@@ -90,7 +90,7 @@ Unchanged: `fitting/` and `tomography/` have no quantify-scheduler imports and p
 Each phase ends with tests green in `qbs_env`. Phases 1–5 need no hardware.
 
 0. **Environment.** `conda env create -f environment.yml` on the lab PC. Run `pip check`, then an import smoke test of `qblox_scheduler`, `qblox_applications`, `quantify_core.analysis`, `pygsti`, `qutip`. Commit the frozen `conda env export` next to the lock.
-1. **Scaffold and analysis port.** Package `qsea` (qblox-scheduler-experiment-analysis; name open, see section 6) in this repo, same layout as `qqea`. Copy `fitting/` and `tomography/` with their tests unchanged. Add CI-style `pytest` (fast tests only).
+1. **Scaffold and analysis port.** Package `qsea` (qblox-scheduler-experiment-analysis) in this repo, same layout as `qqea`. Copy `fitting/` and `tomography/` with their tests unchanged. Add CI-style `pytest` (fast tests only).
 2. **Schedules.** Copy `schedules/`, run `migrate-scripts`, then fix by hand: `Schedule`/`TimeableSchedule`, `bin_mode` → `average_segment_repetitions`, DRAG beta, TWPA flag, `CompositeiSWAPEdge`. Convert parameter sweeps that `ScheduleGettable` used to drive into `Schedule.loop`. **Check that compiled output matches the old code**: extend `tools/compare_schedules.py` to export compiled waveforms and timing (npz/json) from each env and compare them across envs. Run it on every builder, with small tolerances for the DRAG change.
 3. **Device and configs.** pydantic `QuantumDevice` with qblox-applications `BasicTransmonElement` + new `CompositeiSWAPEdge`. Migrate the lab hardware config and device JSON (`migrate-configs`) and convert DRAG beta values. Write a loader that registers element/edge types before `QuantumDevice.from_dict`.
 4. **Execution layer.** Rewrite `experiments/nodes/_base.py` around `HardwareAgent(hw_config, device).run(schedule)`. Port the calibration nodes topic by topic (single_qubit, readout, iswap_stark, roadmap) and the `runners.py` DRAG/readout optimisation. Point `QBLOX_DATADIR` at both `OutputDirectoryManager.set_datadir` and `quantify_core.data.handling.set_datadir` so old analyses find new TUIDs. Dry-run every node with `create_dummy_connections=True` (rewrite `dry_run.py` and its tests).
@@ -99,7 +99,9 @@ Each phase ends with tests green in `qbs_env`. Phases 1–5 need no hardware.
 
 ## 6. Open questions
 
-- **New package name**: `qsea` proposed, to mirror `qqea`.
+Decided: package name `qsea`.
+
+
 - **Sweep style (verified on a dummy cluster)**: inside `Schedule.loop`, a body of only pulses and acquisitions compiles to one real-time loop on the cluster. A body containing `SetParameter(qcodes_param, var)` or `Callback(fn, var)` runs as a Python loop: one parameter set and one compiled sub-schedule per point, with any inner pulse-only loop still real-time. The result is one flat dataset (`acq_index_0`) with the swept values as coords; reshape it with `qblox_applications...analysis.helpers.acq_coords_to_dims`. `Callback` needs a module-level function (it is stored by import path; lambdas and closures fail).
 - **Sweep style**: port each node as a hardware loop (`Schedule.loop`, faster, the native way) or keep software sweeps by running one `HardwareAgent.run` per point? Proposed: hardware loops wherever the swept quantity is a schedule parameter. Software loops only for external instruments (HP83732B TWPA pump power/frequency, LO sweeps).
 - **qblox-applications**: not on PyPI, no tags yet. It is pinned to a commit; switch to a PyPI release once one exists.
