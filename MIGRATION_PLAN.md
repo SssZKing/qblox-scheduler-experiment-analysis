@@ -21,11 +21,11 @@ Status: plan only. No code has been ported yet. Everything marked *verified* bel
 | Package | `qblox_env` (current, lab PC) | `qbs_env` (new) | Notes |
 | --- | --- | --- | --- |
 | Python | 3.9.18 | **3.12** | qblox-scheduler ≥ 3.10, xarray 2026.x ≥ 3.11, qutip 5.3 ≥ 3.11 |
-| quantify-scheduler | 0.23.1 | — | replaced by qblox-scheduler |
+| quantify-scheduler | 0.23.1 | — | replaced by qblox-scheduler. End of life since 2026-07-01 (bugfixes ended 2026-06-30) |
 | **qblox-scheduler** | — | **1.0.1** (+ `[cli]`) | released 2026-10-12; `[cli]` adds the migration tool |
 | **qblox-applications** | — | **git @ `771b6c4`** (2026-10-02) | Not on PyPI. Install from GitLab, which needs `git`. Provides `BasicTransmonElement`, `CompositeSquareEdge` and the analysis classes |
 | qblox-instruments | 0.16.0 | **1.4.1** | cluster firmware: see section 3 |
-| quantify-core | 0.9.1 | 0.9.1 | last release (2025-08); unmaintained |
+| quantify-core | 0.9.1 | 0.9.1 | **end of life**: its README says it is archived and everything moved to unified `quantify`. Last release 2025-08, no commits since 2025-11. Stopgap only (phase 5) |
 | qcodes | 0.46.0 | **0.56.0 (cap)** | 0.57 removed `qcodes.utils.helpers`, which quantify-core imports (*verified*: 0.52–0.56 OK, 0.57+ fail). qblox-instruments 1.4.1 needs ≥ 0.52 |
 | xarray | 2024.2.0 | **2026.2.0 (cap)** | 2026.4+ raises `TypeError` in `write_dataset`, in quantify-core **and in qblox-scheduler 1.0.1's own `AdapterH5NetCDF`** (*verified*), so the cap is needed even without quantify-core |
 | numpy | 1.26.4 | 2.5.4 | numpy 2: check our own code for removed aliases (`np.float_`, `np.complex_`, …) |
@@ -100,6 +100,7 @@ Each phase ends with tests green in `qbs_env`. Phases 1–5 need no hardware.
 ## 6. Open questions
 
 - **New package name**: `qsea` proposed, to mirror `qqea`.
+- **Sweep style (verified on a dummy cluster)**: inside `Schedule.loop`, a body of only pulses and acquisitions compiles to one real-time loop on the cluster. A body containing `SetParameter(qcodes_param, var)` or `Callback(fn, var)` runs as a Python loop: one parameter set and one compiled sub-schedule per point, with any inner pulse-only loop still real-time. The result is one flat dataset (`acq_index_0`) with the swept values as coords; reshape it with `qblox_applications...analysis.helpers.acq_coords_to_dims`. `Callback` needs a module-level function (it is stored by import path; lambdas and closures fail).
 - **Sweep style**: port each node as a hardware loop (`Schedule.loop`, faster, the native way) or keep software sweeps by running one `HardwareAgent.run` per point? Proposed: hardware loops wherever the swept quantity is a schedule parameter. Software loops only for external instruments (HP83732B TWPA pump power/frequency, LO sweeps).
 - **qblox-applications**: not on PyPI, no tags yet. It is pinned to a commit; switch to a PyPI release once one exists.
 - **Firmware upgrade timing**: who does it, and when the reference data from `qblox_env` gets taken.
