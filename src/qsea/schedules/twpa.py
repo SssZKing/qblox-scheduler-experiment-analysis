@@ -30,11 +30,11 @@ from typing import TYPE_CHECKING
 from qcodes.instrument import Instrument
 from qcodes.parameters import ManualParameter
 from qcodes.validators import Bool
-from quantify_scheduler.operations.gate_library import Measure
-from quantify_scheduler.operations.pulse_library import MarkerPulse
+from qblox_scheduler import MarkerPulse, Measure
+from qblox_scheduler.schedules.schedule import Schedulable
 
 if TYPE_CHECKING:
-    from quantify_scheduler.schedules.schedule import Schedulable, Schedule
+    from qblox_scheduler.schedules.schedule import Schedule
 
 TWPA_DELAY = -36e-9
 TWPA_RINGUP = 960e-9

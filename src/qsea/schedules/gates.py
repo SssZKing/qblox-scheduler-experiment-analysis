@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import numpy as np
-from quantify_scheduler import Schedule
-from quantify_scheduler.operations import X90, Y90, IdlePulse, Operation, Rxy, X, Y
+from qblox_scheduler import Schedule
+from qblox_scheduler.operations import X90, Y90, IdlePulse, Operation, Rxy, X, Y
 
 from qsea.schedules.clifford.clifford_group import (
     SingleQubitClifford,

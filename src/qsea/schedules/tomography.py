@@ -6,15 +6,14 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
-from quantify_scheduler import Schedule
-from quantify_scheduler.backends.qblox.constants import MIN_TIME_BETWEEN_OPERATIONS
-from quantify_scheduler.operations import (
+from qblox_scheduler import Schedule
+from qblox_scheduler.backends.qblox.constants import MIN_TIME_BETWEEN_OPERATIONS
+from qblox_scheduler.operations import (
     IdlePulse,
     MarkerPulse,
     Reset,
     ResetClockPhase,
-    Rz,
-)
+    Rz)
 
 from qsea.schedules import gates as _gates
 from qsea.schedules import phase as _phase
@@ -32,9 +31,8 @@ from qsea.schedules.phase import (
 from qsea.schedules.twpa import max_readout_duration, measure_with_twpa
 
 if TYPE_CHECKING:
-    from quantify_scheduler.device_under_test.transmon_element import (
-        BasicTransmonElement,
-    )
+    from qblox_scheduler.device_under_test.transmon_element import (
+        BasicTransmonElement)
 
 ######################################################################################################
 # Quantum State Tomography Schedule
@@ -342,7 +340,7 @@ def tomography_schedule(
         If given (s, 4 ns grid), each warm-up iSWAP is replaced by a bare pump
         pulse of this length. Must match ``tomography_pre_build``.
     """
-    from quantify_scheduler.backends import SerialCompiler
+    from qblox_scheduler.backends import SerialCompiler
 
     if quantum_device is None:
         raise RuntimeError(
@@ -665,7 +663,7 @@ def process_tomography_schedule(
         structural arguments. Required when the schedule contains iSWAPs and
         the pump is on.
     """
-    from quantify_scheduler.backends import SerialCompiler
+    from qblox_scheduler.backends import SerialCompiler
 
     if quantum_device is None:
         raise RuntimeError(

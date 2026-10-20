@@ -6,9 +6,9 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
-from quantify_scheduler import Schedule
-from quantify_scheduler.backends.qblox.constants import MIN_TIME_BETWEEN_OPERATIONS
-from quantify_scheduler.operations import (
+from qblox_scheduler import Schedule
+from qblox_scheduler.backends.qblox.constants import MIN_TIME_BETWEEN_OPERATIONS
+from qblox_scheduler.operations import (
     X90,
     Y90,
     IdlePulse,
@@ -17,8 +17,7 @@ from quantify_scheduler.operations import (
     Rxy,
     Rz,
     X,
-    Y,
-)
+    Y)
 
 from qsea.schedules import gates as _gates
 from qsea.schedules.gates import iSWAP
@@ -31,9 +30,8 @@ from qsea.schedules.phase import (
 from qsea.schedules.twpa import max_readout_duration, measure_with_twpa
 
 if TYPE_CHECKING:
-    from quantify_scheduler.device_under_test.transmon_element import (
-        BasicTransmonElement,
-    )
+    from qblox_scheduler.device_under_test.transmon_element import (
+        BasicTransmonElement)
 
 
 def pygsti_circuit_to_gate_decomposition(circuit, max_qubits=2):
@@ -536,7 +534,7 @@ def GST_schedule(
         across the whole ``experiment_list``, as returned by ``GST_pre_build``
         called with matching structural arguments.
     """
-    from quantify_scheduler.backends import SerialCompiler
+    from qblox_scheduler.backends import SerialCompiler
 
     if quantum_device is None:
         raise RuntimeError("GST_schedule requires a quantum_device (pass quantum_device=... ).")

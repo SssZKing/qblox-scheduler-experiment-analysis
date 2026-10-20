@@ -3,24 +3,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, List, Literal, Optional, Union
 
 import numpy as np
-from quantify_scheduler.backends.graph_compilation import SerialCompiler
-from quantify_scheduler.enums import BinMode
-from quantify_scheduler.operations.acquisition_library import (
-    SSBIntegrationComplex,
-    Trace,
-)
-from quantify_scheduler.operations.gate_library import X90, Measure, Reset, Rxy, X
-from quantify_scheduler.operations.pulse_library import (
-    DRAGPulse,
-    IdlePulse,
-    MarkerPulse,
-    ResetClockPhase,
-    SetClockFrequency,
-    SquarePulse,
-    VoltageOffset,
-)
-from quantify_scheduler.resources import ClockResource
-from quantify_scheduler.schedules.schedule import Schedule
+from qblox_scheduler.backends.graph_compilation import SerialCompiler
+from qblox_scheduler.enums import BinMode
+from qblox_scheduler.schedules.schedule import Schedule
 
 from qsea.schedules.twpa import (
     TWPA_DELAY,
@@ -30,14 +15,14 @@ from qsea.schedules.twpa import (
     max_readout_duration,
     measure_with_twpa,
 )
+from qblox_scheduler import ClockResource, DRAGPulse, IQIntegration, IdlePulse, MarkerPulse, Measure, Reset, ResetClockPhase, Rxy, SetClockFrequency, SquarePulse, Trace, VoltageOffset, X, X90
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from qcodes.instrument import Instrument
-    from quantify_scheduler.device_under_test.transmon_element import (
-        BasicTransmonElement,
-    )
+    from qblox_scheduler.device_under_test.transmon_element import (
+        BasicTransmonElement)
 
 STARK_LEAD = 10e-6  # Stark tone turns on this long before the end of Reset
 
@@ -106,7 +91,7 @@ def time_of_flight_calibration(
         spec_pulse = schedule.add(
             SquarePulse(
                 duration=pulse_duration,
-                amp=pulse_amp,
+                amplitude=pulse_amp,
                 port=port,
                 clock=clock,
             ),
@@ -114,8 +99,8 @@ def time_of_flight_calibration(
     elif pulse_type=="DRAG":
         spec_pulse = schedule.add(
             DRAGPulse(
-                G_amp=pulse_amp,
-                D_amp=0,
+                amplitude=pulse_amp,
+                beta=0 * (pulse_duration / (2 * 4)),
                 duration=pulse_duration,
                 phase=0,
                 port=port,
@@ -128,7 +113,7 @@ def time_of_flight_calibration(
             duration=acq_duration,
             port=port,
             clock=clock,
-            acq_channel=0,
+            acq_label=0,
             acq_index=0,
         ),
         ref_pt="start",
@@ -177,7 +162,7 @@ def sweep_optimal_TWPA(
         spec_pulse = schedule.add(
             SquarePulse(
                 duration=pulse_duration,
-                amp=pulse_amp,
+                amplitude=pulse_amp,
                 port=port_out,
                 clock=clock,
             ),
@@ -185,14 +170,13 @@ def sweep_optimal_TWPA(
         )
 
         schedule.add(
-            SSBIntegrationComplex(
+            IQIntegration(
                 duration=integration_time,
                 port=port,
                 clock=clock,
                 acq_index=i,
-                acq_channel=0,
-                bin_mode=BinMode.AVERAGE,
-            ),
+                acq_label=0,
+                ),
             ref_op=spec_pulse,
             ref_pt="start",
             rel_time=acquisition_delay,
@@ -241,7 +225,7 @@ def heterodyne_spec_sched_nco(
         spec_pulse = schedule.add(
             SquarePulse(
                 duration=pulse_duration,
-                amp=pulse_amp,
+                amplitude=pulse_amp,
                 port=port_out,
                 clock=clock,
             ),
@@ -249,14 +233,13 @@ def heterodyne_spec_sched_nco(
         )
 
         schedule.add(
-            SSBIntegrationComplex(
+            IQIntegration(
                 duration=integration_time,
                 port=port,
                 clock=clock,
                 acq_index=i,
-                acq_channel=0,
-                bin_mode=BinMode.AVERAGE,
-            ),
+                acq_label=0,
+                ),
             ref_op=spec_pulse,
             ref_pt="start",
             rel_time=acquisition_delay,
@@ -322,7 +305,7 @@ def multiplexed_heterodyne_spec_sched_nco(
             spec_pulse = schedule.add(
                 SquarePulse(
                     duration=pulse_duration,
-                    amp=pulse_amp,
+                    amplitude=pulse_amp,
                     port=port_out[acq_channel],
                     clock=clocks[acq_channel],
                 ),
@@ -331,14 +314,13 @@ def multiplexed_heterodyne_spec_sched_nco(
             )
 
             schedule.add(
-                SSBIntegrationComplex(
+                IQIntegration(
                     duration=integration_time,
                     port=ports[acq_channel],
                     clock=clocks[acq_channel],
                     acq_index=i,
-                    acq_channel=acq_channel,
-                    bin_mode=BinMode.AVERAGE,
-                ),
+                    acq_label=acq_channel,
+                    ),
                 ref_op=prep,
                 ref_pt="end",
                 rel_time=acquisition_delay,
@@ -388,7 +370,7 @@ def two_tone_spec_sched_nco(
         spec_pulse = schedule.add(
             SquarePulse(
                 duration=spec_pulse_duration,
-                amp=spec_pulse_amp,
+                amplitude=spec_pulse_amp,
                 port=spec_pulse_port,
                 clock=spec_pulse_clock,
             ),
@@ -398,7 +380,7 @@ def two_tone_spec_sched_nco(
         ro_pulse = schedule.add(
             SquarePulse(
                 duration=ro_pulse_duration,
-                amp=ro_pulse_amp,
+                amplitude=ro_pulse_amp,
                 port=ro_pulse_port,
                 clock=ro_pulse_clock,
             ),
@@ -409,14 +391,13 @@ def two_tone_spec_sched_nco(
         )
 
         schedule.add(
-            SSBIntegrationComplex(
+            IQIntegration(
                 duration=ro_integration_time,
                 port=ro_pulse_port,
                 clock=ro_pulse_clock,
                 acq_index=i,
-                acq_channel=0,
-                bin_mode=BinMode.AVERAGE,
-            ),
+                acq_label=0,
+                ),
             ref_op=ro_pulse,
             ref_pt="start",
             rel_time=ro_acquisition_delay,
@@ -484,7 +465,7 @@ def multiplexed_two_tone_spec_sched_nco(
             spec_pulse = schedule.add(
                 SquarePulse(
                     duration=pulse_duration,
-                    amp=pulse_amp,
+                    amplitude=pulse_amp,
                     port=spec_ports[acq_channel],
                     clock=spec_clocks[acq_channel],
                 ),
@@ -496,7 +477,7 @@ def multiplexed_two_tone_spec_sched_nco(
                 Measure(
                     qubits[acq_channel], 
                     acq_index=i, 
-                    acq_channel=acq_channel,
+                    acq_label=acq_channel,
                 ),
                 ref_op=spec_pulse,
                 ref_pt="end",
@@ -543,8 +524,8 @@ def rabi_sched(
         DRAG = schedule.add(
             DRAGPulse(
                 duration=duration,
-                G_amp=amp,
-                D_amp=0,
+                amplitude=amp,
+                beta=0 * (duration / (2 * 4)),
                 port=port,
                 clock=clock,
                 phase=0,
@@ -597,8 +578,8 @@ def rabi_amplification(
             DRAG = schedule.add(
                 DRAGPulse(
                     duration=duration,
-                    G_amp=amp,
-                    D_amp=0,
+                    amplitude=amp,
+                    beta=0 * (duration / (2 * 4)),
                     port=port,
                     clock=clock,
                     phase=0,
@@ -722,7 +703,7 @@ def add_stark_tone(
         label=None if label is None else f"Stark off {label}",
     )
     schedule.add(
-        SquarePulse(amp=stark_amp, duration=4e-9, port=qubit + ":mw", clock=clock),
+        SquarePulse(amplitude=stark_amp, duration=4e-9, port=qubit + ":mw", clock=clock),
         ref_op=stark_off,
         ref_pt="start",
         label=None if label is None else f"Stark tail {label}",
@@ -1164,8 +1145,8 @@ def readout_calibration_sched(
             DRAG = schedule.add(
                 DRAGPulse(
                     duration=e2f_duration,
-                    G_amp=e2f_amp,
-                    D_amp=0,
+                    amplitude=e2f_amp,
+                    beta=0 * (e2f_duration / (2 * 4)),
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1178,7 +1159,7 @@ def readout_calibration_sched(
             raise ValueError(f"Prepared state ({prep_state}) must be either 0, 1 or 2.")
         ro_pulse = schedule.add(
             Measure(
-                qubit, acq_index=i, bin_mode=BinMode.APPEND, acq_protocol=acq_protocol
+                qubit, acq_index=i, acq_protocol=acq_protocol
             ),
             label=f"Measurement {i}",
         )
@@ -1299,7 +1280,7 @@ def dressed_e_cavity(
         spec_pulse = schedule.add(
             SquarePulse(
                 duration=pulse_duration,
-                amp=pulse_amp,
+                amplitude=pulse_amp,
                 port=port_out,
                 clock=clock,
             ),
@@ -1307,14 +1288,13 @@ def dressed_e_cavity(
         )
 
         ro_pulse = schedule.add(
-            SSBIntegrationComplex(
+            IQIntegration(
                 duration=integration_time,
                 port=port,
                 clock=clock,
                 acq_index=i,
-                acq_channel=0,
-                bin_mode=BinMode.AVERAGE,
-            ),
+                acq_label=0,
+                ),
             ref_op=spec_pulse,
             ref_pt="start",
             rel_time=acquisition_delay,
@@ -1366,7 +1346,7 @@ def f_state_spec_sched_nco(
         spec_pulse = schedule.add(
             SquarePulse(
                 duration=spec_pulse_duration,
-                amp=spec_pulse_amp,
+                amplitude=spec_pulse_amp,
                 port=spec_pulse_port,
                 clock=spec_pulse_clock,
             ),
@@ -1416,8 +1396,8 @@ def f_state_rabi_sched(
         DRAG = schedule.add(
             DRAGPulse(
                 duration=duration,
-                G_amp=amp,
-                D_amp=0,
+                amplitude=amp,
+                beta=0 * (duration / (2 * 4)),
                 port=port,
                 clock=clock,
                 phase=0,
@@ -1480,8 +1460,8 @@ def f_state_cavity(
         DRAG = schedule.add(
             DRAGPulse(
                 duration=e2f_duration,
-                G_amp=e2f_amp,
-                D_amp=0,
+                amplitude=e2f_amp,
+                beta=0 * (e2f_duration / (2 * 4)),
                 port=f"{qubit}:fs",
                 clock=f"{qubit}.12",
                 phase=0,
@@ -1498,7 +1478,7 @@ def f_state_cavity(
         spec_pulse = schedule.add(
             SquarePulse(
                 duration=pulse_duration,
-                amp=pulse_amp,
+                amplitude=pulse_amp,
                 port=port_out,
                 clock=clock,
             ),
@@ -1506,14 +1486,13 @@ def f_state_cavity(
         )
 
         ro_pulse = schedule.add(
-            SSBIntegrationComplex(
+            IQIntegration(
                 duration=integration_time,
                 port=port,
                 clock=clock,
                 acq_index=i,
-                acq_channel=0,
-                bin_mode=BinMode.AVERAGE,
-            ),
+                acq_label=0,
+                ),
             ref_op=spec_pulse,
             ref_pt="start",
             rel_time=acquisition_delay,
@@ -1564,8 +1543,8 @@ def f_state_t1(
             DRAG = schedule.add(
                 DRAGPulse(
                     duration=e2f_duration,
-                    G_amp=e2f_amp,
-                    D_amp=0,
+                    amplitude=e2f_amp,
+                    beta=0 * (e2f_duration / (2 * 4)),
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1581,8 +1560,8 @@ def f_state_t1(
             DRAG = schedule.add(
                 DRAGPulse(
                     duration=e2f_duration,
-                    G_amp=e2f_amp,
-                    D_amp=0,
+                    amplitude=e2f_amp,
+                    beta=0 * (e2f_duration / (2 * 4)),
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1637,8 +1616,8 @@ def multiplex_IQ(
             DRAG = schedule.add(
                 DRAGPulse(
                     duration=e2f_duration,
-                    G_amp=e2f_amp,
-                    D_amp=0,
+                    amplitude=e2f_amp,
+                    beta=0 * (e2f_duration / (2 * 4)),
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1655,7 +1634,7 @@ def multiplex_IQ(
             schedule.add(
                 SquarePulse(
                     duration=pulse_duration,
-                    amp=pulse_amp,
+                    amplitude=pulse_amp,
                     port=f"{qubit}:res",
                     clock=qubit+"."+dres_state,
                 ),
@@ -1664,14 +1643,13 @@ def multiplex_IQ(
             )
             
             schedule.add(
-                SSBIntegrationComplex(
+                IQIntegration(
                     duration=pulse_duration,
                     port=f"{qubit}:res",
                     clock=qubit+"."+dres_state,
                     acq_index=i,
-                    acq_channel=acq_channel,
-                    bin_mode=BinMode.APPEND,
-                ),
+                    acq_label=acq_channel,
+                    ),
                 ref_op=prep,
                 ref_pt="end",
                 rel_time=acquisition_delay,
@@ -1724,8 +1702,8 @@ def RO_raw_trace(
             DRAG = schedule.add(
                 DRAGPulse(
                     duration=e2f_duration,
-                    G_amp=e2f_amp,
-                    D_amp=0,
+                    amplitude=e2f_amp,
+                    beta=0 * (e2f_duration / (2 * 4)),
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1742,7 +1720,7 @@ def RO_raw_trace(
             schedule.add(
                 SquarePulse(
                     duration=pulse_duration,
-                    amp=pulse_amp,
+                    amplitude=pulse_amp,
                     port=f"{qubit}:res",
                     clock=qubit+"."+dres_state,
                 ),
@@ -1756,9 +1734,8 @@ def RO_raw_trace(
                 port=f"{qubit}:res",
                 clock=qubit+"."+dres_state,
                 acq_index=i,
-                acq_channel=0,
-                bin_mode=BinMode.AVERAGE,
-            ),
+                acq_label=0,
+                ),
             ref_op=prep,
             ref_pt="end",
             rel_time=acquisition_delay,
@@ -1802,8 +1779,8 @@ def rabi_population(
             DRAG = schedule.add(
                 DRAGPulse(
                     duration=e2f_duration,
-                    G_amp=e2f_amp * angle/180,
-                    D_amp=0,
+                    amplitude=e2f_amp * angle/180,
+                    beta=0 * (e2f_duration / (2 * 4)),
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1826,8 +1803,8 @@ def rabi_population(
             DRAG = schedule.add(
                 DRAGPulse(
                     duration=e2f_duration,
-                    G_amp=e2f_amp * angle/180,
-                    D_amp=0,
+                    amplitude=e2f_amp * angle/180,
+                    beta=0 * (e2f_duration / (2 * 4)),
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -2043,7 +2020,7 @@ def pump_heterodyne_spec_sched_nco(
             spec_pulse = schedule.add(
                 SquarePulse(
                     duration=pulse_duration,
-                    amp=pulse_amp,
+                    amplitude=pulse_amp,
                     port=port_out,
                     clock=clock,
                 ),
@@ -2051,14 +2028,13 @@ def pump_heterodyne_spec_sched_nco(
             )
     
             schedule.add(
-                SSBIntegrationComplex(
+                IQIntegration(
                     duration=integration_time,
                     port=port,
                     clock=clock,
                     acq_index=i,
-                    acq_channel=0,
-                    bin_mode=BinMode.AVERAGE,
-                ),
+                    acq_label=0,
+                    ),
                 ref_op=spec_pulse,
                 ref_pt="start",
                 rel_time=acquisition_delay,
@@ -2310,8 +2286,8 @@ def pump_RPM(
             DRAG = schedule.add(
                 DRAGPulse(
                     duration=e2f_duration,
-                    G_amp=e2f_amp * angle/180,
-                    D_amp=0,
+                    amplitude=e2f_amp * angle/180,
+                    beta=0 * (e2f_duration / (2 * 4)),
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -2325,8 +2301,8 @@ def pump_RPM(
             DRAG = schedule.add(
                 DRAGPulse(
                     duration=e2f_duration,
-                    G_amp=e2f_amp * angle/180,
-                    D_amp=0,
+                    amplitude=e2f_amp * angle/180,
+                    beta=0 * (e2f_duration / (2 * 4)),
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -2377,7 +2353,7 @@ def cavity_charging(
         charging_pulse = schedule.add(
             SquarePulse(
                 duration=pi_duration + init_duration,
-                amp=amp,
+                amplitude=amp,
                 port=port,
                 clock=clock,
             ),

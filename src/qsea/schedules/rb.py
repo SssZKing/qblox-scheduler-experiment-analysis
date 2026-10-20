@@ -6,9 +6,9 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 import numpy as np
-from quantify_scheduler import Schedule
-from quantify_scheduler.backends.qblox.constants import MIN_TIME_BETWEEN_OPERATIONS
-from quantify_scheduler.operations import IdlePulse, Reset, ResetClockPhase, X
+from qblox_scheduler import Schedule
+from qblox_scheduler.backends.qblox.constants import MIN_TIME_BETWEEN_OPERATIONS
+from qblox_scheduler.operations import IdlePulse, Reset, ResetClockPhase, X
 
 from qsea.schedules.clifford.clifford_group import (
     common_cliffords,
@@ -20,9 +20,8 @@ from qsea.schedules.gates import index_to_operation
 from qsea.schedules.twpa import max_readout_duration, measure_with_twpa
 
 if TYPE_CHECKING:
-    from quantify_scheduler.device_under_test.transmon_element import (
-        BasicTransmonElement,
-    )
+    from qblox_scheduler.device_under_test.transmon_element import (
+        BasicTransmonElement)
 
 
 def randomized_benchmarking_schedule(

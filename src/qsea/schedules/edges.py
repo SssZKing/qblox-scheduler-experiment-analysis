@@ -17,12 +17,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from qcodes.instrument import InstrumentChannel
-from qcodes.instrument.parameter import ManualParameter
+from qcodes.parameters import ManualParameter
 
-from quantify_scheduler.backends.graph_compilation import OperationCompilationConfig
-from quantify_scheduler.device_under_test.edge import Edge
-from quantify_scheduler.helpers.validators import Numbers
-from quantify_scheduler.operations import pulse_library
+from qblox_scheduler.device_under_test.edge import Edge
+from qblox_scheduler.helpers.validators import Numbers
+from qblox_scheduler.operations import pulse_library
+from qblox_scheduler import OperationCompilationConfig
 
 if TYPE_CHECKING:
     from qcodes.instrument.base import InstrumentBase

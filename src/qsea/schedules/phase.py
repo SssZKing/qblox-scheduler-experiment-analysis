@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from quantify_scheduler import Schedule
+from qblox_scheduler import Schedule
 
 from qsea.schedules import gates as _gates
 
@@ -203,7 +203,7 @@ def compute_iswap_t1(sched: Schedule, quantum_device) -> list[float]:
     here as the unique fingerprint to find each occurrence in the compiled
     timing table.
     """
-    from quantify_scheduler.backends import SerialCompiler
+    from qblox_scheduler.backends import SerialCompiler
 
     compiler = SerialCompiler(name="compiler")
     compiled_schedule = compiler.compile(
