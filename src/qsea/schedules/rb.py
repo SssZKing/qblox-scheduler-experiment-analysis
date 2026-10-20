@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 import numpy as np
-from qblox_scheduler import Schedule
+from qblox_scheduler.schedules.schedule import TimeableSchedule
 from qblox_scheduler.backends.qblox.constants import MIN_TIME_BETWEEN_OPERATIONS
 from qblox_scheduler.operations import IdlePulse, Reset, ResetClockPhase, X
 
@@ -16,7 +16,7 @@ from qsea.schedules.clifford.clifford_group import (
 from qsea.schedules.clifford.randomized_benchmarking import (
     randomized_benchmarking_sequence,
 )
-from qsea.schedules.gates import index_to_operation
+from qsea.schedules.gates import add_clifford
 from qsea.schedules.twpa import max_readout_duration, measure_with_twpa
 
 if TYPE_CHECKING:
@@ -30,7 +30,7 @@ def randomized_benchmarking_schedule(
     seeds: Iterable[int],
     desired_net_clifford_index: int | None = common_cliffords["I"],
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
     """
     Generate a randomized benchmarking schedule.
 
@@ -81,7 +81,7 @@ def randomized_benchmarking_schedule(
         raise ValueError("Only single and two-qubit randomized benchmarking supported.")
 
     # ---- Build RB schedule ----#
-    sched = Schedule(
+    sched = TimeableSchedule(
         "Randomized benchmarking on " + " and ".join(qubit_names), repetitions=repetitions
     )
 
@@ -103,9 +103,7 @@ def randomized_benchmarking_schedule(
         )
 
         for m_i, clifford_gate_idx in enumerate(rb_sequence_m):
-            gate_sched = index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx)
-            if gate_sched is not None:
-                sched.add(gate_sched)
+            add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx)
 
         # TODO: project before measuring if desired_net_clifford_index is not
         # common_cliffords["I"]
@@ -113,7 +111,7 @@ def randomized_benchmarking_schedule(
             sched,
             *qubit_names,
             readout_duration=readout_duration,
-            acq_index=acq_idx,
+            coords={"acq_index": acq_idx},
         )
 
     # Calibration points measured by preparing ground and excited states.
@@ -122,7 +120,7 @@ def randomized_benchmarking_schedule(
         sched,
         *qubit_names,
         readout_duration=readout_duration,
-        acq_index=acq_idx + 1,
+        coords={"acq_index": acq_idx + 1},
         label="Calibration 0",
     )
     
@@ -133,7 +131,7 @@ def randomized_benchmarking_schedule(
         sched,
         *qubit_names,
         readout_duration=readout_duration,
-        acq_index=acq_idx + 2,
+        coords={"acq_index": acq_idx + 2},
         label="Calibration 1",
     )
 
@@ -147,7 +145,7 @@ def simultaneous_randomized_benchmarking_schedule(
     seeds: Iterable[int],
     desired_net_clifford_index: int | None = common_cliffords["I"],
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
     """
     Generate a simultaneous single-qubit randomized benchmarking schedule.
 
@@ -199,7 +197,7 @@ def simultaneous_randomized_benchmarking_schedule(
         raise ValueError("Simultaneous randomized benchmarking should have two qubits.")
 
     # ---- Build RB schedule ----#
-    sched = Schedule(
+    sched = TimeableSchedule(
         "Randomized benchmarking on " + " and ".join(qubit_names), repetitions=repetitions
     )
 
@@ -225,9 +223,7 @@ def simultaneous_randomized_benchmarking_schedule(
 
         for m_i, (clifford_gate_idx1, clifford_gate_idx2) in enumerate(zip(rb_sequence_m1, rb_sequence_m2)):
             two_qubit_clifford_gate_idx = clifford_gate_idx1 + 24 * clifford_gate_idx2
-            gate_sched = index_to_operation(qubit_names, operation_buffer_time, two_qubit_clifford_gate_idx)
-            if gate_sched is not None:
-                sched.add(gate_sched)
+            add_clifford(sched, qubit_names, operation_buffer_time, two_qubit_clifford_gate_idx)
 
         # TODO: project before measuring if desired_net_clifford_index is not
         # common_cliffords["I"]
@@ -235,7 +231,7 @@ def simultaneous_randomized_benchmarking_schedule(
             sched,
             *qubit_names,
             readout_duration=readout_duration,
-            acq_index=acq_idx,
+            coords={"acq_index": acq_idx},
         )
 
     # Calibration points measured by preparing ground and excited states.
@@ -244,7 +240,7 @@ def simultaneous_randomized_benchmarking_schedule(
         sched,
         *qubit_names,
         readout_duration=readout_duration,
-        acq_index=acq_idx + 1,
+        coords={"acq_index": acq_idx + 1},
         label="Calibration 0",
     )
     
@@ -255,7 +251,7 @@ def simultaneous_randomized_benchmarking_schedule(
         sched,
         *qubit_names,
         readout_duration=readout_duration,
-        acq_index=acq_idx + 2,
+        coords={"acq_index": acq_idx + 2},
         label="Calibration 1",
     )
 

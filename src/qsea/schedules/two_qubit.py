@@ -12,6 +12,8 @@ from qsea.fitting.rb import RBAnalysis
 from qsea.schedules.gates import (
     ISWAP_CONSECUTIVE_GAP,
     ISWAP_SETTLE,
+    add_clifford,
+    add_layers,
     index_to_operation,
     iSWAP,
     iSWAP_DELAY,
@@ -19,6 +21,7 @@ from qsea.schedules.gates import (
 from qsea.schedules.gst import (
     GST_pre_build,
     GST_schedule,
+    add_pygsti_circuit,
     pygsti_circuit_to_gate_decomposition,
     pygsti_circuit_to_operation,
 )
@@ -55,6 +58,8 @@ __all__ = [
     "ISWAP_SETTLE",
     "ISWAP_CONSECUTIVE_GAP",
     "iSWAP",
+    "add_clifford",
+    "add_layers",
     "index_to_operation",
     "PUMP_OFF_DBM",
     "AC_STARK_PHASE_Q0",
@@ -75,6 +80,7 @@ __all__ = [
     "tomography_schedule",
     "process_tomography_pre_build",
     "process_tomography_schedule",
+    "add_pygsti_circuit",
     "pygsti_circuit_to_gate_decomposition",
     "pygsti_circuit_to_operation",
     "GST_pre_build",

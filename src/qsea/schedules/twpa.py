@@ -18,23 +18,22 @@ parameter ``twpa_pump``::
     set_twpa_pump(qubit1, True)    # readouts of qubit1 trigger the pump
     set_twpa_pump(qubit2, False)   # qubit2 is read out without it
 
-``set_twpa_pump`` adds the parameter to the element the first time, so it shows
-up in every dataset snapshot. A qubit that never had it set pumps the TWPA, as
-all readouts did before the setting existed.
+qblox-scheduler elements are pydantic models that reject unknown fields, so the
+setting is kept here, by element name, instead of as an extra element parameter.
+A qubit that never had it set pumps the TWPA, as all readouts did before the
+setting existed. :func:`twpa_pump_settings` returns the current settings, for
+saving them with a dataset snapshot.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from qcodes.instrument import Instrument
-from qcodes.parameters import ManualParameter
-from qcodes.validators import Bool
 from qblox_scheduler import MarkerPulse, Measure
 from qblox_scheduler.schedules.schedule import Schedulable
 
 if TYPE_CHECKING:
-    from qblox_scheduler.schedules.schedule import Schedule
+    from qblox_scheduler.schedules.schedule import TimeableSchedule
 
 TWPA_DELAY = -36e-9
 TWPA_RINGUP = 960e-9
@@ -46,53 +45,49 @@ __all__ = [
     "TWPA_TAIL",
     "set_twpa_pump",
     "twpa_pump_enabled",
+    "twpa_pump_settings",
     "max_readout_duration",
     "add_twpa_marker",
     "measure_with_twpa",
 ]
 
 
-def set_twpa_pump(element, enabled: bool = True) -> None:
-    """Set whether readouts of ``element`` trigger the TWPA pump.
+# Element name -> whether its readouts trigger the TWPA pump. Missing means True.
+_TWPA_PUMP: dict[str, bool] = {}
 
-    Adds a ``twpa_pump`` parameter to the element the first time it is called.
-    """
-    if "twpa_pump" not in element.parameters:
-        element.add_parameter(
-            "twpa_pump",
-            parameter_class=ManualParameter,
-            initial_value=True,
-            vals=Bool(),
-            docstring="Whether readouts of this element trigger the TWPA pump "
-            "(marker on <element>:switch). See qsea.schedules.twpa.",
-        )
-    element.twpa_pump(enabled)
+
+def _element_name(element) -> str:
+    return element if isinstance(element, str) else element.name
+
+
+def set_twpa_pump(element, enabled: bool = True) -> None:
+    """Set whether readouts of ``element`` (an element or its name) trigger the TWPA pump."""
+    _TWPA_PUMP[_element_name(element)] = bool(enabled)
 
 
 def twpa_pump_enabled(qubit) -> bool:
     """Whether readouts of ``qubit`` (an element or its name) trigger the TWPA pump.
 
-    True unless the element's ``twpa_pump`` parameter is set to False. A name with
-    no element behind it (e.g. a bare port prefix) also counts as pumped.
+    True unless :func:`set_twpa_pump` turned it off for that element name. A name
+    with no element behind it (e.g. a bare port prefix) also counts as pumped.
     """
-    if isinstance(qubit, str):
-        try:
-            qubit = Instrument.find_instrument(qubit)
-        except KeyError:
-            return True
-    param = qubit.parameters.get("twpa_pump")
-    return True if param is None else bool(param())
+    return _TWPA_PUMP.get(_element_name(qubit), True)
+
+
+def twpa_pump_settings() -> dict[str, bool]:
+    """The elements whose TWPA setting was changed with :func:`set_twpa_pump`, by name."""
+    return dict(_TWPA_PUMP)
 
 
 def max_readout_duration(qubits) -> float:
-    """Longest ``measure.pulse_duration()`` of one element or an iterable of them."""
+    """Longest ``measure.pulse_duration`` of one element or an iterable of them."""
     if hasattr(qubits, "name"):
         qubits = [qubits]
-    return max(qubit.measure.pulse_duration() for qubit in qubits)
+    return max(qubit.measure.pulse_duration for qubit in qubits)
 
 
 def add_twpa_marker(
-    schedule: Schedule,
+    schedule: TimeableSchedule,
     ref_op: Schedulable,
     switch_port: str,
     readout_duration: float,
@@ -143,7 +138,7 @@ def add_twpa_marker(
 
 
 def measure_with_twpa(
-    schedule: Schedule,
+    schedule: TimeableSchedule,
     *qubits: str,
     readout_duration: float,
     rel_time: float = 0,
@@ -174,7 +169,8 @@ def measure_with_twpa(
     marker_label
         Optional label of the marker.
     **measure_kwargs
-        Passed to ``Measure`` (``acq_index``, ``acq_protocol``, ``bin_mode``, ...).
+        Passed to ``Measure`` (``coords``, ``acq_protocol``, ``average_segment_repetitions``,
+        ...; see :mod:`qsea.schedules.acquisition` for the old ``acq_index``/``bin_mode``).
 
     Returns
     -------

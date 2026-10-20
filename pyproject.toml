@@ -49,4 +49,5 @@ testpaths = ["tests"]
 where = ["src"]
 
 [tool.setuptools.package-data]
+"qsea.schedules" = ["*.md", "clifford/LICENSE.txt", "clifford/clifford_hash_tables/*.txt"]
 "qsea.tomography" = ["pmatrix.npy"]

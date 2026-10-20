@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
-from qblox_scheduler import Schedule
+from qblox_scheduler.schedules.schedule import TimeableSchedule
 from qblox_scheduler.backends.qblox.constants import MIN_TIME_BETWEEN_OPERATIONS
 from qblox_scheduler.operations import (
     IdlePulse,
@@ -21,7 +21,7 @@ from qsea.schedules import gates as _gates
 from qsea.schedules.clifford.clifford_group import (
     common_cliffords,
 )
-from qsea.schedules.gates import index_to_operation
+from qsea.schedules.gates import add_clifford
 from qsea.schedules.phase import (
     _ac_stark_phases,
     _detuning_residual,
@@ -29,6 +29,7 @@ from qsea.schedules.phase import (
     compute_iswap_t1,
 )
 from qsea.schedules.twpa import max_readout_duration, measure_with_twpa
+from qsea.schedules.acquisition import acq_protocol_name
 
 if TYPE_CHECKING:
     from qblox_scheduler.device_under_test.transmon_element import (
@@ -41,10 +42,10 @@ def iswap_pulsed_pump_schedule(
     desired_net_clifford_index: int | None = common_cliffords["I"],
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
     iswap_spacing: float = 0.0,
-) -> Schedule:
+) -> TimeableSchedule:
     """
     Pulsed pump iSWAP repetitive schedule.
 
@@ -70,7 +71,7 @@ def iswap_pulsed_pump_schedule(
         raise ValueError("Only single and two-qubit randomized benchmarking supported.")
 
     # ---- Build RB schedule ----#
-    sched = Schedule(
+    sched = TimeableSchedule(
         "Pulsed pump iSWAP", repetitions=repetitions
     )
 
@@ -82,21 +83,19 @@ def iswap_pulsed_pump_schedule(
         for qubit_name in qubit_names:
             sched.add(ResetClockPhase(clock=f"{qubit_name}.01"), ref_op=qubit_reset, ref_pt="end")
 
-        sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=72))
-
+        add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=72)
         for m_i in range(m):
             if m_i > 0 and iswap_spacing > 0:
                 sched.add(IdlePulse(duration=iswap_spacing))
-            sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=5760))
-
+            add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=5760)
         # TODO: project before measuring if desired_net_clifford_index is not
         # common_cliffords["I"]
         measure_with_twpa(
             sched,
             *qubit_names,
             readout_duration=readout_duration,
-            acq_index=acq_idx,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": acq_idx},
+            acq_protocol=acq_protocol_name(acq_protocol),
         )
 
     sched.add(IdlePulse(duration=4e-9))
@@ -111,9 +110,9 @@ def iswap_tail_1q_schedule(
     reference_duration: float | None = None,
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "ThresholdedAcquisition",
-) -> Schedule:
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "ThresholdedIQIntegration",
+) -> TimeableSchedule:
     """
     Does the pump's tail after an iSWAP disturb the single-qubit gate that follows?
 
@@ -140,25 +139,25 @@ def iswap_tail_1q_schedule(
     readout_duration = max_readout_duration(qubits)
     operation_buffer_time = MIN_TIME_BETWEEN_OPERATIONS * 4e-9
 
-    sched = Schedule("iSWAP tail on 1Q gates", repetitions=repetitions)
+    sched = TimeableSchedule("iSWAP tail on 1Q gates", repetitions=repetitions)
     for acq_idx, m in enumerate(lengths):
         qubit_reset = sched.add(Reset(*qubit_names))
         for qubit_name in qubit_names:
             sched.add(ResetClockPhase(clock=f"{qubit_name}.01"), ref_op=qubit_reset, ref_pt="end")
         for _ in range(m):
             if pump:
-                sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=5760))
+                add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=5760)
             else:
                 sched.add(IdlePulse(duration=reference_duration))
             if gap > 0:
                 sched.add(IdlePulse(duration=gap))
-            sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=75))
+            add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=75)
         measure_with_twpa(
             sched,
             *qubit_names,
             readout_duration=readout_duration,
-            acq_index=acq_idx,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": acq_idx},
+            acq_protocol=acq_protocol_name(acq_protocol),
         )
     sched.add(IdlePulse(duration=4e-9))
     return sched
@@ -174,9 +173,9 @@ def pump_probe_ramsey_schedule(
     pump: bool = True,
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "ThresholdedAcquisition",
-) -> Schedule:
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "ThresholdedIQIntegration",
+) -> TimeableSchedule:
     """
     Frequency of one qubit after a pump pulse, without any iSWAP in the probe.
 
@@ -206,7 +205,7 @@ def pump_probe_ramsey_schedule(
             raise ValueError("delays, window and pump_duration must be >= 0 and on the 4 ns grid.")
     q = qubit_names[probe]
     readout_duration = max_readout_duration(qubits)
-    sched = Schedule("Pump-probe Ramsey on " + q, repetitions=repetitions)
+    sched = TimeableSchedule("Pump-probe Ramsey on " + q, repetitions=repetitions)
     for acq_idx, delay in enumerate(delays):
         qubit_reset = sched.add(Reset(*qubit_names))
         for qubit_name in qubit_names:
@@ -226,8 +225,8 @@ def pump_probe_ramsey_schedule(
             sched,
             *qubit_names,
             readout_duration=readout_duration,
-            acq_index=acq_idx,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": acq_idx},
+            acq_protocol=acq_protocol_name(acq_protocol),
         )
     sched.add(IdlePulse(duration=4e-9))
     return sched
@@ -243,9 +242,9 @@ def pump_probe_swap_schedule(
     excite_before_pre: bool = False,
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "ThresholdedAcquisition",
-) -> Schedule:
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "ThresholdedIQIntegration",
+) -> TimeableSchedule:
     """
     Exchange (chevron) after a pump pre-pulse: does a preceding pump pulse change the swap?
 
@@ -273,7 +272,7 @@ def pump_probe_swap_schedule(
         if x < 0 or abs(round(x / 4e-9) * 4e-9 - x) > 1e-12:
             raise ValueError("durations, pre_duration and gap must be >= 0 and on the 4 ns grid.")
     readout_duration = max_readout_duration(qubits)
-    sched = Schedule("Pump-probe swap", repetitions=repetitions)
+    sched = TimeableSchedule("Pump-probe swap", repetitions=repetitions)
 
     def _pump(duration):
         sched.add(MarkerPulse(duration=duration, port="snail:switch"), rel_time=26e-9 - _gates.iSWAP_DELAY)
@@ -300,8 +299,8 @@ def pump_probe_swap_schedule(
             sched,
             *qubit_names,
             readout_duration=readout_duration,
-            acq_index=acq_idx,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": acq_idx},
+            acq_protocol=acq_protocol_name(acq_protocol),
         )
     sched.add(IdlePulse(duration=4e-9))
     return sched
@@ -316,9 +315,9 @@ def iswap_virtual_z_schedule(
     desired_net_clifford_index: int | None = common_cliffords["I"],
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
-) -> Schedule:
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
+) -> TimeableSchedule:
 
     # ---- Error handling and argument parsing ---- #
     lengths = np.asarray(lengths, dtype=int)
@@ -335,7 +334,7 @@ def iswap_virtual_z_schedule(
     if n not in (1, 2):
         raise ValueError("Only single and two-qubit iSWAP phase tracking is supported.")
 
-    sched = Schedule("iSWAP Phase Tracking", repetitions=repetitions)
+    sched = TimeableSchedule("iSWAP Phase Tracking", repetitions=repetitions)
 
     operation_buffer_time = [0.0, MIN_TIME_BETWEEN_OPERATIONS * 4e-9][n - 1]
 
@@ -347,13 +346,9 @@ def iswap_virtual_z_schedule(
         # for _ in range(10):
         #     sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=5760))
 
-        sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=gate_idx))
-
+        add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=gate_idx)
         for m_i, clifford_gate_idx in enumerate(range(m)):
-            gate_sched = index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=5760)
-            if gate_sched is not None:
-                # sched.add(IdlePulse(duration=pause_duration))
-                sched.add(gate_sched)
+            add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=5760)
             # if m_i == 0:
             #     sched.add(ShiftClockPhase(clock=f"{qubit_names[0]}.01", phase_shift=27))
             #     sched.add(ShiftClockPhase(clock=f"{qubit_names[1]}.01", phase_shift=27))
@@ -362,16 +357,15 @@ def iswap_virtual_z_schedule(
         sched.add(ShiftClockPhase(clock=f"{qubit_names[0]}.01", phase_shift=angle))
         sched.add(ShiftClockPhase(clock=f"{qubit_names[1]}.01", phase_shift=angle))
 
-        sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=gate_idx))
-
+        add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=gate_idx)
         # sched.add(IdlePulse(duration=400e-9))
 
         measure_with_twpa(
             sched,
             *qubit_names,
             readout_duration=readout_duration,
-            acq_index=acq_idx,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": acq_idx},
+            acq_protocol=acq_protocol_name(acq_protocol),
         )
 
     sched.add(IdlePulse(duration=4e-9))
@@ -388,11 +382,11 @@ def iswap_RPE_f(
     desired_net_clifford_index: int | None = common_cliffords["I"],
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "ThresholdedAcquisition",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "ThresholdedIQIntegration",
     quantum_device=None,
     final_axis: str = "x",
-) -> Schedule:
+) -> TimeableSchedule:
     """
     Insert virtual-Z corrections around each iSWAP, following the phase
     tracking of dissertation section 4.3.2.
@@ -438,7 +432,7 @@ def iswap_RPE_f(
 
     Notes
     -----
-    Part 1 alone is a no-op in this schedule: ``index_to_operation`` maps
+    Part 1 alone is a no-op in this schedule: ``add_clifford`` maps
     every Clifford to a physical ``Rxy``, so there are no virtual-Z gates
     and ``c_a = c_b = 0`` until part 2 or ``AC_STARK_PHASE_Q0``/``Q1`` seeds
     the register.
@@ -473,42 +467,40 @@ def iswap_RPE_f(
 
     operation_buffer_time = [0.0, MIN_TIME_BETWEEN_OPERATIONS * 4e-9][n - 1]
 
-    def _build(iswap_phases: list[tuple[float, float]] | None) -> Schedule:
+    def _build(iswap_phases: list[tuple[float, float]] | None) -> TimeableSchedule:
         """Build the RPE schedule. If ``iswap_phases`` is given, insert an
         Rz correction ``(theta_q0, theta_q1)`` right after each iSWAP
         occurrence, consumed in chronological order."""
         phase_iter = iter(iswap_phases) if iswap_phases is not None else None
-        sched = Schedule("RPE_f", repetitions=repetitions)
+        sched = TimeableSchedule("RPE_f", repetitions=repetitions)
 
         for acq_idx, m in enumerate(lengths):
             qubit_reset = sched.add(Reset(*qubit_names))
             for qubit_name in qubit_names:
                 sched.add(ResetClockPhase(clock=f"{qubit_name}.01"), ref_op=qubit_reset, ref_pt="end")
 
-            sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=13))
-
+            add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=13)
             for m_i, clifford_gate_idx in enumerate(range(m)):
-                sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=6))
-                sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=5760))
+                add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=6)
+                add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=5760)
                 if phase_iter is not None:
                     theta_q0, theta_q1 = next(phase_iter)
                     sched.add(Rz(qubit=qubit_names[0], theta=theta_q0))
                     sched.add(Rz(qubit=qubit_names[1], theta=theta_q1))
-                sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=144))
-                sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=5760))
+                add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=144)
+                add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=5760)
                 if phase_iter is not None:
                     theta_q0, theta_q1 = next(phase_iter)
                     sched.add(Rz(qubit=qubit_names[0], theta=theta_q0))
                     sched.add(Rz(qubit=qubit_names[1], theta=theta_q1))
 
-            sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=final_clifford))
-
+            add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=final_clifford)
             measure_with_twpa(
                 sched,
                 *qubit_names,
                 readout_duration=readout_duration,
-                acq_index=acq_idx,
-                acq_protocol=acq_protocol,
+                coords={"acq_index": acq_idx},
+                acq_protocol=acq_protocol_name(acq_protocol),
             )
 
         sched.add(IdlePulse(duration=4e-9))
@@ -554,14 +546,14 @@ def iswap_RPE_theta_sum(
     lengths: Iterable[int],
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "ThresholdedAcquisition",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "ThresholdedIQIntegration",
     quantum_device=None,
     warmup_iswaps: int = 0,
     final_axis: str = "x",
     train_padding: float = 0.0,
     iswap_spacing: float = 0.0,
-) -> Schedule:
+) -> TimeableSchedule:
     """
     Amplify ``theta_sum = theta_1 + theta_2`` alone, free of ``phi_zz`` and
     ``phi_p``.
@@ -627,12 +619,12 @@ def iswap_RPE_theta_sum(
 
     operation_buffer_time = MIN_TIME_BETWEEN_OPERATIONS * 4e-9
 
-    def _build(iswap_phases: list[tuple[float, float]] | None) -> Schedule:
+    def _build(iswap_phases: list[tuple[float, float]] | None) -> TimeableSchedule:
         """Build the schedule. If ``iswap_phases`` is given, insert an Rz
         correction ``(theta_q0, theta_q1)`` right after each iSWAP, consumed
         in chronological order."""
         phase_iter = iter(iswap_phases) if iswap_phases is not None else None
-        sched = Schedule("RPE_theta_sum", repetitions=repetitions)
+        sched = TimeableSchedule("RPE_theta_sum", repetitions=repetitions)
 
         for acq_idx, m in enumerate(lengths):
             qubit_reset = sched.add(Reset(*qubit_names))
@@ -640,16 +632,15 @@ def iswap_RPE_theta_sum(
                 sched.add(ResetClockPhase(clock=f"{qubit_name}.01"), ref_op=qubit_reset, ref_pt="end")
 
             for _ in range(warmup_iswaps):
-                sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=5760))
-
-            sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=13))
+                add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=5760)
+            add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=13)
             if train_padding > 0:
                 sched.add(IdlePulse(duration=train_padding))
 
             for k in range(2 * m):
                 if k > 0 and iswap_spacing > 0:
                     sched.add(IdlePulse(duration=iswap_spacing))
-                sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=5760))
+                add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=5760)
                 if phase_iter is not None:
                     theta_q0, theta_q1 = next(phase_iter)
                     sched.add(Rz(qubit=qubit_names[0], theta=theta_q0))
@@ -657,14 +648,13 @@ def iswap_RPE_theta_sum(
 
             if train_padding > 0:
                 sched.add(IdlePulse(duration=train_padding))
-            sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=final_clifford))
-
+            add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=final_clifford)
             measure_with_twpa(
                 sched,
                 *qubit_names,
                 readout_duration=readout_duration,
-                acq_index=acq_idx,
-                acq_protocol=acq_protocol,
+                coords={"acq_index": acq_idx},
+                acq_protocol=acq_protocol_name(acq_protocol),
             )
 
         sched.add(IdlePulse(duration=4e-9))
@@ -709,10 +699,10 @@ def iswap_RPE_d(
     desired_net_clifford_index: int | None = common_cliffords["I"],
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "ThresholdedAcquisition",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "ThresholdedIQIntegration",
     quantum_device=None,
-) -> Schedule:
+) -> TimeableSchedule:
     """
     Insert virtual-Z corrections around each full iSWAP, following the phase
     tracking of dissertation section 4.3.2. See ``iswap_RPE_f`` for the
@@ -757,31 +747,30 @@ def iswap_RPE_d(
 
     operation_buffer_time = [0.0, MIN_TIME_BETWEEN_OPERATIONS * 4e-9][n - 1]
 
-    def _build(iswap_phases: list[tuple[float, float]] | None) -> Schedule:
+    def _build(iswap_phases: list[tuple[float, float]] | None) -> TimeableSchedule:
         """Build the RPE schedule. If ``iswap_phases`` is given, insert an
         Rz correction ``(theta_q0, theta_q1)`` right after each full iSWAP
         occurrence, consumed in chronological order."""
         phase_iter = iter(iswap_phases) if iswap_phases is not None else None
-        sched = Schedule("RPE_d", repetitions=repetitions)
+        sched = TimeableSchedule("RPE_d", repetitions=repetitions)
 
         for acq_idx, m in enumerate(lengths):
             qubit_reset = sched.add(Reset(*qubit_names))
             for qubit_name in qubit_names:
                 sched.add(ResetClockPhase(clock=f"{qubit_name}.01"), ref_op=qubit_reset, ref_pt="end")
 
-            sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=3))
+            add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=3)
             sched.add(MarkerPulse(duration=sqrt_iswap_duration, port="snail:switch"), rel_time=26e-9-_gates.iSWAP_DELAY)
             sched.add(IdlePulse(duration=_gates.iSWAP_DELAY + _gates.ISWAP_SETTLE))
-            sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=3))
-
+            add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=3)
             for m_i, clifford_gate_idx in enumerate(range(m)):
-                sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=5760))
+                add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=5760)
                 if phase_iter is not None:
                     theta_q0, theta_q1 = next(phase_iter)
                     sched.add(Rz(qubit=qubit_names[0], theta=theta_q0))
                     sched.add(Rz(qubit=qubit_names[1], theta=theta_q1))
 
-            sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=3))
+            add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=3)
             sched.add(MarkerPulse(duration=sqrt_iswap_duration, port="snail:switch"), rel_time=26e-9-_gates.iSWAP_DELAY)
             sched.add(IdlePulse(duration=_gates.iSWAP_DELAY + _gates.ISWAP_SETTLE))
 
@@ -789,8 +778,8 @@ def iswap_RPE_d(
                 sched,
                 *qubit_names,
                 readout_duration=readout_duration,
-                acq_index=acq_idx,
-                acq_protocol=acq_protocol,
+                coords={"acq_index": acq_idx},
+                acq_protocol=acq_protocol_name(acq_protocol),
             )
 
         sched.add(IdlePulse(duration=4e-9))
@@ -842,9 +831,9 @@ def iswap_delay_schedule(
     desired_net_clifford_index: int | None = common_cliffords["I"],
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
-) -> Schedule:
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
+) -> TimeableSchedule:
 
     if hasattr(qubit_specifier, "name"):
         qubits = [qubit_specifier]
@@ -858,7 +847,7 @@ def iswap_delay_schedule(
     if n not in (1, 2):
         raise ValueError("Only single and two-qubit iSWAP phase tracking is supported.")
 
-    sched = Schedule("iSWAP Delay Calibration", repetitions=repetitions)
+    sched = TimeableSchedule("iSWAP Delay Calibration", repetitions=repetitions)
 
     # operation_buffer_time = [0.0, MIN_TIME_BETWEEN_OPERATIONS * 4e-9][n - 1]
 
@@ -867,18 +856,17 @@ def iswap_delay_schedule(
         for qubit_name in qubit_names:
             sched.add(ResetClockPhase(clock=f"{qubit_name}.01"), ref_op=qubit_reset, ref_pt="end")
 
-        first_pulse = sched.add(index_to_operation(qubit_names, 0, clifford_gate_idx=gate_idx))
-
-        gate_sched = index_to_operation(qubit_names, 0, clifford_gate_idx=5760)
-        swap_pulse = sched.add(gate_sched, ref_op=first_pulse, ref_pt="end", rel_time=delay-120e-9)
+        first_pulse = add_clifford(sched, qubit_names, 0, clifford_gate_idx=gate_idx)
+        swap_pulse = add_clifford(sched, qubit_names, 0, clifford_gate_idx=5760,
+                                  ref_op=first_pulse, ref_pt="end", rel_time=delay-120e-9)
 
         # sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=gate_idx))
         measure_with_twpa(
             sched,
             *qubit_names,
             readout_duration=readout_duration,
-            acq_index=acq_idx,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": acq_idx},
+            acq_protocol=acq_protocol_name(acq_protocol),
             ref_op=swap_pulse,
             ref_pt="end",
             rel_time=0,

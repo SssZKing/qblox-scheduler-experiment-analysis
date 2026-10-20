@@ -4,8 +4,7 @@ from typing import TYPE_CHECKING, List, Literal, Optional, Union
 
 import numpy as np
 from qblox_scheduler.backends.graph_compilation import SerialCompiler
-from qblox_scheduler.enums import BinMode
-from qblox_scheduler.schedules.schedule import Schedule
+from qblox_scheduler.schedules.schedule import TimeableSchedule
 
 from qsea.schedules.twpa import (
     TWPA_DELAY,
@@ -16,6 +15,7 @@ from qsea.schedules.twpa import (
     measure_with_twpa,
 )
 from qblox_scheduler import ClockResource, DRAGPulse, IQIntegration, IdlePulse, MarkerPulse, Measure, Reset, ResetClockPhase, Rxy, SetClockFrequency, SquarePulse, Trace, VoltageOffset, X, X90
+from qsea.schedules.acquisition import acq_protocol_name
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -82,9 +82,9 @@ def time_of_flight_calibration(
     pulse_type: Literal[
         "Square", "DRAG"
     ] = "Square",
-) -> Schedule:
+) -> TimeableSchedule:
 
-    schedule = Schedule("Time of flight")
+    schedule = TimeableSchedule("Time of flight")
     schedule.add(IdlePulse(duration=1e-6))
 
     if pulse_type=="Square":
@@ -100,7 +100,7 @@ def time_of_flight_calibration(
         spec_pulse = schedule.add(
             DRAGPulse(
                 amplitude=pulse_amp,
-                beta=0 * (pulse_duration / (2 * 4)),
+                beta=0,
                 duration=pulse_duration,
                 phase=0,
                 port=port,
@@ -114,7 +114,7 @@ def time_of_flight_calibration(
             port=port,
             clock=clock,
             acq_label=0,
-            acq_index=0,
+            coords={"acq_index": 0},
         ),
         ref_pt="start",
         rel_time=time_of_flight
@@ -140,9 +140,9 @@ def sweep_optimal_TWPA(
     init_duration: float = 10e-6,
     repetitions: int = 1,
     port_out: Optional[str] = None,
-) -> Schedule:
+) -> TimeableSchedule:
     
-    schedule = Schedule("Sweep power and frequency for TWPA", repetitions)
+    schedule = TimeableSchedule("Sweep power and frequency for TWPA", repetitions)
     schedule.add_resource(ClockResource(name=clock, freq=frequencies.flat[0]))
 
     if port_out is None:
@@ -155,7 +155,7 @@ def sweep_optimal_TWPA(
         schedule.add(IdlePulse(duration=init_duration), label=f"buffer {i}")
 
         schedule.add(
-            SetClockFrequency(clock=clock, clock_freq_new=freq),
+            SetClockFrequency(clock=clock, frequency=freq),
             label=f"set_freq {i} ({clock} {freq:e} Hz)",
         )
 
@@ -174,7 +174,7 @@ def sweep_optimal_TWPA(
                 duration=integration_time,
                 port=port,
                 clock=clock,
-                acq_index=i,
+                coords={"acq_index": i},
                 acq_label=0,
                 ),
             ref_op=spec_pulse,
@@ -206,9 +206,9 @@ def heterodyne_spec_sched_nco(
     init_duration: float = 10e-6,
     repetitions: int = 1,
     port_out: Optional[str] = None,
-) -> Schedule:
+) -> TimeableSchedule:
     
-    schedule = Schedule("Fast heterodyne spectroscopy (NCO sweep)(TWPA)", repetitions)
+    schedule = TimeableSchedule("Fast heterodyne spectroscopy (NCO sweep)(TWPA)", repetitions)
     schedule.add_resource(ClockResource(name=clock, freq=frequencies.flat[0]))
 
     if port_out is None:
@@ -218,7 +218,7 @@ def heterodyne_spec_sched_nco(
         schedule.add(IdlePulse(duration=init_duration), label=f"buffer {i}")
 
         schedule.add(
-            SetClockFrequency(clock=clock, clock_freq_new=freq),
+            SetClockFrequency(clock=clock, frequency=freq),
             label=f"set_freq {i} ({clock} {freq:e} Hz)",
         )
         
@@ -237,7 +237,7 @@ def heterodyne_spec_sched_nco(
                 duration=integration_time,
                 port=port,
                 clock=clock,
-                acq_index=i,
+                coords={"acq_index": i},
                 acq_label=0,
                 ),
             ref_op=spec_pulse,
@@ -271,9 +271,9 @@ def multiplexed_heterodyne_spec_sched_nco(
     init_duration: float = 10e-6,
     repetitions: int = 1,
     port_out: Optional[str] = None,
-) -> Schedule:
+) -> TimeableSchedule:
     
-    schedule = Schedule("Multiplexed heterodyne spectroscopy (NCO sweep)(TWPA)", repetitions)
+    schedule = TimeableSchedule("Multiplexed heterodyne spectroscopy (NCO sweep)(TWPA)", repetitions)
 
     if port_out is None:
             port_out = ports
@@ -296,7 +296,7 @@ def multiplexed_heterodyne_spec_sched_nco(
                 frequencies = frequencies_qubit2
 
             schedule.add(
-                SetClockFrequency(clock=clocks[acq_channel], clock_freq_new=frequencies[idx]),
+                SetClockFrequency(clock=clocks[acq_channel], frequency=frequencies[idx]),
                 ref_op=prep,
                 ref_pt="end",
                 rel_time=-100e-9
@@ -318,7 +318,7 @@ def multiplexed_heterodyne_spec_sched_nco(
                     duration=integration_time,
                     port=ports[acq_channel],
                     clock=clocks[acq_channel],
-                    acq_index=i,
+                    coords={"acq_index": i},
                     acq_label=acq_channel,
                     ),
                 ref_op=prep,
@@ -349,9 +349,9 @@ def two_tone_spec_sched_nco(
     ro_integration_time: float,
     init_duration: float,
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
     
-    schedule = Schedule("Fast two-tone spectroscopy (NCO sweep)(TWPA)", repetitions)
+    schedule = TimeableSchedule("Fast two-tone spectroscopy (NCO sweep)(TWPA)", repetitions)
     schedule.add_resources(
         [
             ClockResource(name=spec_pulse_clock, freq=spec_pulse_frequencies.flat[0]),
@@ -363,7 +363,7 @@ def two_tone_spec_sched_nco(
         schedule.add(IdlePulse(duration=init_duration), label=f"buffer {i}")
 
         schedule.add(
-            SetClockFrequency(clock=spec_pulse_clock, clock_freq_new=spec_pulse_freq),
+            SetClockFrequency(clock=spec_pulse_clock, frequency=spec_pulse_freq),
             label=f"set_freq {i} ({spec_pulse_clock} {spec_pulse_freq:e} Hz)",
         )
 
@@ -395,7 +395,7 @@ def two_tone_spec_sched_nco(
                 duration=ro_integration_time,
                 port=ro_pulse_port,
                 clock=ro_pulse_clock,
-                acq_index=i,
+                coords={"acq_index": i},
                 acq_label=0,
                 ),
             ref_op=ro_pulse,
@@ -426,17 +426,17 @@ def multiplexed_two_tone_spec_sched_nco(
     ro_pulse_delay: float,
     init_duration: float = 300e-6,
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
-    readout_duration = qubits[0].measure.pulse_duration()
-    acquisition_delay = qubits[0].measure.acq_delay()
+    readout_duration = qubits[0].measure.pulse_duration
+    acquisition_delay = qubits[0].measure.acq_delay
     qubits = [qubit.name for qubit in qubits]
     spec_ports = [f"{qubit}:mw" for qubit in qubits]
     spec_clocks = [f"{qubit}.01" for qubit in qubits]
     ro_ports = [f"{qubit}:res" for qubit in qubits]
     ro_clocks = [f"{qubit}.ro" for qubit in qubits]
     
-    schedule = Schedule("Multiplexed qubit spectroscopy (TWPA)", repetitions)
+    schedule = TimeableSchedule("Multiplexed qubit spectroscopy (TWPA)", repetitions)
         
     for acq_channel, spec_clock in enumerate(spec_clocks):
         if acq_channel == 0:
@@ -456,7 +456,7 @@ def multiplexed_two_tone_spec_sched_nco(
                 frequencies = frequencies_qubit2
 
             schedule.add(
-                SetClockFrequency(clock=spec_clocks[acq_channel], clock_freq_new=frequencies[idx]),
+                SetClockFrequency(clock=spec_clocks[acq_channel], frequency=frequencies[idx]),
                 ref_op=prep,
                 ref_pt="end",
                 rel_time=-100e-9
@@ -476,7 +476,7 @@ def multiplexed_two_tone_spec_sched_nco(
             ro_pulse = schedule.add(
                 Measure(
                     qubits[acq_channel], 
-                    acq_index=i, 
+                    coords={"acq_index": i}, 
                     acq_label=acq_channel,
                 ),
                 ref_op=spec_pulse,
@@ -504,9 +504,9 @@ def rabi_sched(
     port: str = None,
     clock: str = None,
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     
     amps, durations = _broadcast_amp_duration(pulse_amp, pulse_duration)
@@ -516,7 +516,7 @@ def rabi_sched(
     if clock is None:
         clock = f"{qubit}.01"
 
-    schedule = Schedule("Rabi(TWPA)", repetitions)
+    schedule = TimeableSchedule("Rabi(TWPA)", repetitions)
     schedule.add_resource(ClockResource(name=clock, freq=frequency))
 
     for i, (amp, duration) in enumerate(zip(amps, durations)):
@@ -525,7 +525,7 @@ def rabi_sched(
             DRAGPulse(
                 duration=duration,
                 amplitude=amp,
-                beta=0 * (duration / (2 * 4)),
+                beta=0,
                 port=port,
                 clock=clock,
                 phase=0,
@@ -539,7 +539,7 @@ def rabi_sched(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
+            coords={"acq_index": i},
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -557,9 +557,9 @@ def rabi_amplification(
     port: str = None,
     clock: str = None,
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     
     amps, durations = _broadcast_amp_duration(pulse_amp, pulse_duration)
@@ -569,7 +569,7 @@ def rabi_amplification(
     if clock is None:
         clock = f"{qubit}.01"
 
-    schedule = Schedule("Rabi Error Amplification(TWPA)", repetitions)
+    schedule = TimeableSchedule("Rabi Error Amplification(TWPA)", repetitions)
     schedule.add_resource(ClockResource(name=clock, freq=frequency))
 
     for i, (amp, duration) in enumerate(zip(amps, durations)):
@@ -579,7 +579,7 @@ def rabi_amplification(
                 DRAGPulse(
                     duration=duration,
                     amplitude=amp,
-                    beta=0 * (duration / (2 * 4)),
+                    beta=0,
                     port=port,
                     clock=clock,
                     phase=0,
@@ -593,7 +593,7 @@ def rabi_amplification(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
+            coords={"acq_index": i},
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -607,19 +607,19 @@ def ramsey_sched(
     qubit: BasicTransmonElement,
     artificial_detuning: float = 0,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     
     # ensure times is an iterable when passing floats.
     times = np.asarray(times)
     times = times.reshape(times.shape or (1,))
 
-    schedule = Schedule("Ramsey(TWPA)", repetitions)
+    schedule = TimeableSchedule("Ramsey(TWPA)", repetitions)
 
     if isinstance(times, float):
         times = [times]
@@ -648,8 +648,8 @@ def ramsey_sched(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": i},
+            acq_protocol=acq_protocol_name(acq_protocol),
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -659,7 +659,7 @@ def ramsey_sched(
     return schedule
 
 def add_stark_tone(
-    schedule: Schedule,
+    schedule: TimeableSchedule,
     qubit: str,
     reset_op,
     ro_op,
@@ -716,10 +716,10 @@ def stark_ramsey_sched(
     stark_freq: float,
     artificial_detuning: float = 0,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
     """Ramsey with a constant off-resonant Stark tone on for the whole sequence.
 
     The tone is played on ``<qubit>:mw`` with clock ``<qubit>.stark`` (needs the
@@ -730,10 +730,10 @@ def stark_ramsey_sched(
     ``times`` are start-to-start delays as in ``ramsey_sched``.
     """
 
-    readout_duration = qubit.measure.pulse_duration()
-    if qubit.reset.duration() < STARK_LEAD:
+    readout_duration = qubit.measure.pulse_duration
+    if qubit.reset.duration < STARK_LEAD:
         raise ValueError(
-            f"reset.duration ({qubit.reset.duration()}) must be >= STARK_LEAD ({STARK_LEAD})"
+            f"reset.duration ({qubit.reset.duration}) must be >= STARK_LEAD ({STARK_LEAD})"
         )
     qubit = qubit.name
 
@@ -741,7 +741,7 @@ def stark_ramsey_sched(
     times = np.asarray(times)
     times = times.reshape(times.shape or (1,))
 
-    schedule = Schedule("Stark Ramsey(TWPA)", repetitions)
+    schedule = TimeableSchedule("Stark Ramsey(TWPA)", repetitions)
 
     for i, tau in enumerate(times):
         reset = schedule.add(Reset(qubit), label=f"Reset {i}")
@@ -752,7 +752,7 @@ def stark_ramsey_sched(
         schedule.add(
             Rxy(theta=90, phi=recovery_phase, qubit=qubit), ref_op=x90, ref_pt="start", rel_time=tau
         )
-        ro_pulse = schedule.add(Measure(qubit, acq_index=i, acq_protocol=acq_protocol), label=f"Measurement {i}")
+        ro_pulse = schedule.add(Measure(qubit, coords={"acq_index": i}, acq_protocol=acq_protocol_name(acq_protocol)), label=f"Measurement {i}")
 
         add_stark_tone(
             schedule, qubit, reset, ro_pulse, stark_amp, stark_freq, label=f"{i}"
@@ -777,12 +777,12 @@ def coupled_ramsey_sched(
     condition: bool = True,
     artificial_detuning: float = 0,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     qubit_c = qubit_c.name
     
@@ -790,7 +790,7 @@ def coupled_ramsey_sched(
     times = np.asarray(times)
     times = times.reshape(times.shape or (1,))
 
-    schedule = Schedule("Coupled Ramsey(TWPA)", repetitions)
+    schedule = TimeableSchedule("Coupled Ramsey(TWPA)", repetitions)
 
     if isinstance(times, float):
         times = [times]
@@ -822,8 +822,8 @@ def coupled_ramsey_sched(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": i},
+            acq_protocol=acq_protocol_name(acq_protocol),
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -839,9 +839,9 @@ def coupled_phase_ramsey_sched(
     condition: bool = True,
     tau: float = 2e-6,
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     qubit_c = qubit_c.name
     
@@ -849,7 +849,7 @@ def coupled_phase_ramsey_sched(
     phases = np.asarray(phases)
     phases = phases.reshape(phases.shape or (1,))
 
-    schedule = Schedule("Coupled Ramsey(TWPA)", repetitions)
+    schedule = TimeableSchedule("Coupled Ramsey(TWPA)", repetitions)
 
     if isinstance(phases, float):
         phases = [phases]
@@ -880,7 +880,7 @@ def coupled_phase_ramsey_sched(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
+            coords={"acq_index": i},
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -894,18 +894,18 @@ def echo_sched(
     qubit: BasicTransmonElement,
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
-) -> Schedule:
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
+) -> TimeableSchedule:
     
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
 
     # ensure times is an iterable when passing floats.
     times = np.asarray(times)
     times = times.reshape(times.shape or (1,))
 
-    schedule = Schedule("Echo(TWPA)", repetitions)
+    schedule = TimeableSchedule("Echo(TWPA)", repetitions)
     for i, tau in enumerate(times):
         schedule.add(Reset(qubit), label=f"Reset {i}")
         schedule.add(X90(qubit))
@@ -915,8 +915,8 @@ def echo_sched(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_protocol=acq_protocol,
-            acq_index=i,
+            acq_protocol=acq_protocol_name(acq_protocol),
+            coords={"acq_index": i},
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -929,18 +929,18 @@ def t1_sched(
     qubit: BasicTransmonElement,
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
-) -> Schedule:
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
+) -> TimeableSchedule:
     
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     
     # ensure times is an iterable when passing floats.
     times = np.asarray(times)
     times = times.reshape(times.shape or (1,))
 
-    schedule = Schedule("T1(TWPA)", repetitions)
+    schedule = TimeableSchedule("T1(TWPA)", repetitions)
     for i, tau in enumerate(times):
         schedule.add(Reset(qubit), label=f"Reset {i}")
         schedule.add(X(qubit), label=f"pi {i}")
@@ -949,8 +949,8 @@ def t1_sched(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": i},
+            acq_protocol=acq_protocol_name(acq_protocol),
             ref_pt="end",
             rel_time=tau,
             label=f"Measurement {i}",
@@ -967,25 +967,25 @@ def t1_and_t2(
     artificial_detuning: float = 0,
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
-) -> Schedule:
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
+) -> TimeableSchedule:
     
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     
     # ensure times is an iterable when passing floats.
     times = np.asarray(times)
     times = times.reshape(times.shape or (1,))
 
-    schedule = Schedule("T1 and T2(TWPA)", repetitions)
+    schedule = TimeableSchedule("T1 and T2(TWPA)", repetitions)
     for i, tau in enumerate(times):
         schedule.add(Reset(qubit), label=f"Reset {i}")
 
         if case == 1:
             schedule.add(X(qubit), label=f"pi {i}")
             ro_pulse = schedule.add(
-                Measure(qubit, acq_index=i, acq_protocol=acq_protocol),
+                Measure(qubit, coords={"acq_index": i}, acq_protocol=acq_protocol_name(acq_protocol)),
                 ref_pt="end",
                 rel_time=tau,
                 label=f"Measurement {i}",
@@ -995,7 +995,7 @@ def t1_and_t2(
             schedule.add(X90(qubit))
             schedule.add(X(qubit), ref_pt="end", rel_time=tau / 2)
             schedule.add(X90(qubit), ref_pt="end", rel_time=tau / 2)
-            ro_pulse = schedule.add(Measure(qubit, acq_index=i, acq_protocol=acq_protocol), label=f"Measurement {i}")
+            ro_pulse = schedule.add(Measure(qubit, coords={"acq_index": i}, acq_protocol=acq_protocol_name(acq_protocol)), label=f"Measurement {i}")
 
         elif case == 3:
             schedule.add(X90(qubit), label=f"pi/2 {i}")
@@ -1007,7 +1007,7 @@ def t1_and_t2(
                 rel_time=tau,
                 label=f"recovery pi/2 {i}",
             )
-            ro_pulse = schedule.add(Measure(qubit, acq_index=i, acq_protocol=acq_protocol), label=f"Measurement {i}")
+            ro_pulse = schedule.add(Measure(qubit, coords={"acq_index": i}, acq_protocol=acq_protocol_name(acq_protocol)), label=f"Measurement {i}")
 
         add_twpa_marker(
             schedule,
@@ -1027,9 +1027,9 @@ def multi_qubit_t1_and_t2(
     artificial_detuning: float = 0,
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
-) -> Schedule:
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
+) -> TimeableSchedule:
     
     if hasattr(qubit_specifier, "name"):
         qubits = [qubit_specifier]
@@ -1043,7 +1043,7 @@ def multi_qubit_t1_and_t2(
     times = np.asarray(times)
     times = times.reshape(times.shape or (1,))
 
-    schedule = Schedule("Multi Qubit T1 and T2(TWPA)", repetitions)
+    schedule = TimeableSchedule("Multi Qubit T1 and T2(TWPA)", repetitions)
     for i, tau in enumerate(times):
         for qubit in qubit_names:
             schedule.add(Reset(qubit))
@@ -1051,7 +1051,7 @@ def multi_qubit_t1_and_t2(
             if case == 1:
                 schedule.add(X(qubit))
                 ro_pulse = schedule.add(
-                    Measure(qubit, acq_index=i, acq_protocol=acq_protocol),
+                    Measure(qubit, coords={"acq_index": i}, acq_protocol=acq_protocol_name(acq_protocol)),
                     ref_pt="end",
                     rel_time=tau,
                 )
@@ -1060,7 +1060,7 @@ def multi_qubit_t1_and_t2(
                 schedule.add(X90(qubit))
                 schedule.add(X(qubit), ref_pt="end", rel_time=tau / 2)
                 schedule.add(X90(qubit), ref_pt="end", rel_time=tau / 2)
-                ro_pulse = schedule.add(Measure(qubit, acq_index=i, acq_protocol=acq_protocol))
+                ro_pulse = schedule.add(Measure(qubit, coords={"acq_index": i}, acq_protocol=acq_protocol_name(acq_protocol)))
 
             elif case == 3:
                 schedule.add(X90(qubit))
@@ -1071,7 +1071,7 @@ def multi_qubit_t1_and_t2(
                     ref_pt="start",
                     rel_time=tau,
                 )
-                ro_pulse = schedule.add(Measure(qubit, acq_index=i, acq_protocol=acq_protocol))
+                ro_pulse = schedule.add(Measure(qubit, coords={"acq_index": i}, acq_protocol=acq_protocol_name(acq_protocol)))
 
             add_twpa_marker(schedule, ro_pulse, qubit + ":switch", readout_duration)
 
@@ -1083,14 +1083,14 @@ def multiplexed_readout_calibration_sched(
     prepared_states: List[int],
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
-) -> Schedule:
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
+) -> TimeableSchedule:
 
     readout_duration = max_readout_duration(qubits)
 
     qubit_names = [q.name for q in qubits]
-    schedule = Schedule(f"Multiplexed readout calibration (TWPA)", repetitions)
+    schedule = TimeableSchedule(f"Multiplexed readout calibration (TWPA)", repetitions)
 
     for i, prep_state in enumerate(prepared_states):
         reset = schedule.add(Reset(*qubit_names))
@@ -1106,9 +1106,9 @@ def multiplexed_readout_calibration_sched(
             schedule,
             *qubit_names,
             readout_duration=readout_duration,
-            acq_index=i,
-            bin_mode=BinMode.APPEND,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": i},
+            average_segment_repetitions=False,
+            acq_protocol=acq_protocol_name(acq_protocol),
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -1121,17 +1121,17 @@ def readout_calibration_sched(
     prepared_states: List[int],
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
     e2f_amp: float | None = None,
     e2f_duration: float | None = None,
-) -> Schedule:
+) -> TimeableSchedule:
     e2f_amp, e2f_duration = _e2f_pulse(e2f_amp, e2f_duration)
 
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     
-    schedule = Schedule(f"Readout calibration {qubit}, {prepared_states}(TWPA)", repetitions)
+    schedule = TimeableSchedule(f"Readout calibration {qubit}, {prepared_states}(TWPA)", repetitions)
 
     for i, prep_state in enumerate(prepared_states):
         schedule.add(Reset(qubit), label=f"Reset {i}")
@@ -1146,7 +1146,7 @@ def readout_calibration_sched(
                 DRAGPulse(
                     duration=e2f_duration,
                     amplitude=e2f_amp,
-                    beta=0 * (e2f_duration / (2 * 4)),
+                    beta=0,
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1159,7 +1159,8 @@ def readout_calibration_sched(
             raise ValueError(f"Prepared state ({prep_state}) must be either 0, 1 or 2.")
         ro_pulse = schedule.add(
             Measure(
-                qubit, acq_index=i, acq_protocol=acq_protocol
+                qubit, coords={"acq_index": i}, acq_protocol=acq_protocol_name(acq_protocol),
+                average_segment_repetitions=False,
             ),
             label=f"Measurement {i}",
         )
@@ -1184,8 +1185,8 @@ def allxy_sched(
     qubit: BasicTransmonElement,
     element_select_idx: Union[np.ndarray, int] = np.arange(21),
     repetitions: int = 1,
-) -> Schedule:
-    readout_duration = qubit.measure.pulse_duration()
+) -> TimeableSchedule:
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     
     element_idxs = np.asarray(element_select_idx)
@@ -1216,7 +1217,7 @@ def allxy_sched(
         [(90, 0), (90, 0)],
         [(90, 90), (90, 90)],
     ]
-    schedule = Schedule("AllXY(TWPA)", repetitions)
+    schedule = TimeableSchedule("AllXY(TWPA)", repetitions)
 
     for i, elt_idx in enumerate(element_idxs):
         # check index valid
@@ -1235,7 +1236,7 @@ def allxy_sched(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
+            coords={"acq_index": i},
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -1258,9 +1259,9 @@ def dressed_e_cavity(
     init_duration: float = 10e-6,
     repetitions: int = 1,
     port_out: Optional[str] = None,
-) -> Schedule:
+) -> TimeableSchedule:
     
-    schedule = Schedule("Dressed e Cavity(TWPA)", repetitions)
+    schedule = TimeableSchedule("Dressed e Cavity(TWPA)", repetitions)
     schedule.add_resource(ClockResource(name=clock, freq=frequencies.flat[0]))
 
     if port_out is None:
@@ -1273,7 +1274,7 @@ def dressed_e_cavity(
         schedule.add(X(qubit))
 
         schedule.add(
-            SetClockFrequency(clock=clock, clock_freq_new=freq),
+            SetClockFrequency(clock=clock, frequency=freq),
             label=f"set_freq {i} ({clock} {freq:e} Hz)",
         )
 
@@ -1292,7 +1293,7 @@ def dressed_e_cavity(
                 duration=integration_time,
                 port=port,
                 clock=clock,
-                acq_index=i,
+                coords={"acq_index": i},
                 acq_label=0,
                 ),
             ref_op=spec_pulse,
@@ -1324,12 +1325,12 @@ def f_state_spec_sched_nco(
     spec_pulse_frequencies: np.ndarray,
     qubit: BasicTransmonElement,
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     
-    schedule = Schedule("f state spectroscopy (NCO sweep)(TWPA)", repetitions)
+    schedule = TimeableSchedule("f state spectroscopy (NCO sweep)(TWPA)", repetitions)
     schedule.add_resources([
         ClockResource(name=spec_pulse_clock, freq=spec_pulse_frequencies.flat[0]),
     ])
@@ -1339,7 +1340,7 @@ def f_state_spec_sched_nco(
         schedule.add(X(qubit), label=f"pi {i}")
 
         schedule.add(
-            SetClockFrequency(clock=spec_pulse_clock, clock_freq_new=spec_pulse_freq),
+            SetClockFrequency(clock=spec_pulse_clock, frequency=spec_pulse_freq),
             label=f"set_freq {i} ({spec_pulse_clock} {spec_pulse_freq:e} Hz)",
         )
         
@@ -1357,7 +1358,7 @@ def f_state_spec_sched_nco(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
+            coords={"acq_index": i},
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -1374,9 +1375,9 @@ def f_state_rabi_sched(
     port: str = None,
     clock: str = None,
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     
     amps, durations = _broadcast_amp_duration(pulse_amp, pulse_duration)
@@ -1386,7 +1387,7 @@ def f_state_rabi_sched(
     if clock is None:
         clock = f"{qubit}.12"
 
-    schedule = Schedule("f state Rabi(TWPA)", repetitions)
+    schedule = TimeableSchedule("f state Rabi(TWPA)", repetitions)
     schedule.add_resource(ClockResource(name=clock, freq=frequency))
 
     for i, (amp, duration) in enumerate(zip(amps, durations)):
@@ -1397,7 +1398,7 @@ def f_state_rabi_sched(
             DRAGPulse(
                 duration=duration,
                 amplitude=amp,
-                beta=0 * (duration / (2 * 4)),
+                beta=0,
                 port=port,
                 clock=clock,
                 phase=0,
@@ -1420,7 +1421,7 @@ def f_state_rabi_sched(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
+            coords={"acq_index": i},
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -1443,10 +1444,10 @@ def f_state_cavity(
     port_out: Optional[str] = None,
     e2f_amp: float | None = None,
     e2f_duration: float | None = None,
-) -> Schedule:
+) -> TimeableSchedule:
     e2f_amp, e2f_duration = _e2f_pulse(e2f_amp, e2f_duration)
     
-    schedule = Schedule("Dressed f Cavity(TWPA)", repetitions)
+    schedule = TimeableSchedule("Dressed f Cavity(TWPA)", repetitions)
     schedule.add_resource(ClockResource(name=clock, freq=frequencies.flat[0]))
 
     if port_out is None:
@@ -1461,7 +1462,7 @@ def f_state_cavity(
             DRAGPulse(
                 duration=e2f_duration,
                 amplitude=e2f_amp,
-                beta=0 * (e2f_duration / (2 * 4)),
+                beta=0,
                 port=f"{qubit}:fs",
                 clock=f"{qubit}.12",
                 phase=0,
@@ -1471,7 +1472,7 @@ def f_state_cavity(
         )
 
         schedule.add(
-            SetClockFrequency(clock=clock, clock_freq_new=freq),
+            SetClockFrequency(clock=clock, frequency=freq),
             label=f"set_freq {i} ({clock} {freq:e} Hz)",
         )
 
@@ -1490,7 +1491,7 @@ def f_state_cavity(
                 duration=integration_time,
                 port=port,
                 clock=clock,
-                acq_index=i,
+                coords={"acq_index": i},
                 acq_label=0,
                 ),
             ref_op=spec_pulse,
@@ -1517,21 +1518,21 @@ def f_state_t1(
     case: Union[np.ndarray, int],
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
     e2f_amp: float | None = None,
     e2f_duration: float | None = None,
-) -> Schedule:
+) -> TimeableSchedule:
     e2f_amp, e2f_duration = _e2f_pulse(e2f_amp, e2f_duration)
     
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     
     # ensure times is an iterable when passing floats.
     times = np.asarray(times)
     times = times.reshape(times.shape or (1,))
 
-    schedule = Schedule("f-state T1", repetitions)
+    schedule = TimeableSchedule("f-state T1", repetitions)
     for i, tau in enumerate(times):
         schedule.add(Reset(qubit), label=f"Reset {i}")
 
@@ -1544,7 +1545,7 @@ def f_state_t1(
                 DRAGPulse(
                     duration=e2f_duration,
                     amplitude=e2f_amp,
-                    beta=0 * (e2f_duration / (2 * 4)),
+                    beta=0,
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1561,7 +1562,7 @@ def f_state_t1(
                 DRAGPulse(
                     duration=e2f_duration,
                     amplitude=e2f_amp,
-                    beta=0 * (e2f_duration / (2 * 4)),
+                    beta=0,
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1574,8 +1575,8 @@ def f_state_t1(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": i},
+            acq_protocol=acq_protocol_name(acq_protocol),
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -1590,16 +1591,16 @@ def multiplex_IQ(
     repetitions: int = 1,
     e2f_amp: float | None = None,
     e2f_duration: float | None = None,
-) -> Schedule:
+) -> TimeableSchedule:
     e2f_amp, e2f_duration = _e2f_pulse(e2f_amp, e2f_duration)
 
-    readout_duration = qubit.measure.pulse_duration()
-    acquisition_delay = qubit.measure.acq_delay()
-    pulse_duration = qubit.measure.pulse_duration()
-    pulse_amp = qubit.measure.pulse_amp()
+    readout_duration = qubit.measure.pulse_duration
+    acquisition_delay = qubit.measure.acq_delay
+    pulse_duration = qubit.measure.pulse_duration
+    pulse_amp = qubit.measure.pulse_amp
     qubit = qubit.name
     
-    schedule = Schedule(f"Meltipexed Readout calibration {qubit}, {prepared_states}(TWPA)", repetitions)
+    schedule = TimeableSchedule(f"Meltipexed Readout calibration {qubit}, {prepared_states}(TWPA)", repetitions)
     
     for acq_channel, dres_state in enumerate(["dres_g", "dres_e", "dres_f"]):
         schedule.add_resource(ClockResource(name=qubit+"."+dres_state, freq=multiplexing_freq[acq_channel]))
@@ -1617,7 +1618,7 @@ def multiplex_IQ(
                 DRAGPulse(
                     duration=e2f_duration,
                     amplitude=e2f_amp,
-                    beta=0 * (e2f_duration / (2 * 4)),
+                    beta=0,
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1647,8 +1648,9 @@ def multiplex_IQ(
                     duration=pulse_duration,
                     port=f"{qubit}:res",
                     clock=qubit+"."+dres_state,
-                    acq_index=i,
+                    coords={"acq_index": i},
                     acq_label=acq_channel,
+                    average_segment_repetitions=False,
                     ),
                 ref_op=prep,
                 ref_pt="end",
@@ -1676,16 +1678,16 @@ def RO_raw_trace(
     repetitions: int = 1,
     e2f_amp: float | None = None,
     e2f_duration: float | None = None,
-) -> Schedule:
+) -> TimeableSchedule:
     e2f_amp, e2f_duration = _e2f_pulse(e2f_amp, e2f_duration)
 
-    readout_duration = qubit.measure.pulse_duration()
-    acquisition_delay = qubit.measure.acq_delay()
-    pulse_duration = qubit.measure.pulse_duration()
-    pulse_amp = qubit.measure.pulse_amp()
+    readout_duration = qubit.measure.pulse_duration
+    acquisition_delay = qubit.measure.acq_delay
+    pulse_duration = qubit.measure.pulse_duration
+    pulse_amp = qubit.measure.pulse_amp
     qubit = qubit.name
     
-    schedule = Schedule(f"Meltipexed RO Trace {qubit}, {prepared_states}(TWPA)", repetitions)
+    schedule = TimeableSchedule(f"Meltipexed RO Trace {qubit}, {prepared_states}(TWPA)", repetitions)
     
     for acq_channel, dres_state in enumerate(["dres_g", "dres_e", "dres_f"]):
         schedule.add_resource(ClockResource(name=qubit+"."+dres_state, freq=multiplexing_freq[acq_channel]))
@@ -1703,7 +1705,7 @@ def RO_raw_trace(
                 DRAGPulse(
                     duration=e2f_duration,
                     amplitude=e2f_amp,
-                    beta=0 * (e2f_duration / (2 * 4)),
+                    beta=0,
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1733,7 +1735,7 @@ def RO_raw_trace(
                 duration=pulse_duration,
                 port=f"{qubit}:res",
                 clock=qubit+"."+dres_state,
-                acq_index=i,
+                coords={"acq_index": i},
                 acq_label=0,
                 ),
             ref_op=prep,
@@ -1760,17 +1762,17 @@ def rabi_population(
     angles: Union[np.ndarray, float],
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition"
-    ] = "SSBIntegrationComplex",
+        "IQIntegration", "ThresholdedIQIntegration"
+    ] = "IQIntegration",
     e2f_amp: float | None = None,
     e2f_duration: float | None = None,
-) -> Schedule:
+) -> TimeableSchedule:
     e2f_amp, e2f_duration = _e2f_pulse(e2f_amp, e2f_duration)
 
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
     
-    schedule = Schedule(f"Rabi Population Measurement(TWPA)", repetitions)
+    schedule = TimeableSchedule(f"Rabi Population Measurement(TWPA)", repetitions)
 
     for i, angle in enumerate(angles):
         schedule.add(Reset(qubit), label=f"Reset {i}")
@@ -1780,7 +1782,7 @@ def rabi_population(
                 DRAGPulse(
                     duration=e2f_duration,
                     amplitude=e2f_amp * angle/180,
-                    beta=0 * (e2f_duration / (2 * 4)),
+                    beta=0,
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1804,7 +1806,7 @@ def rabi_population(
                 DRAGPulse(
                     duration=e2f_duration,
                     amplitude=e2f_amp * angle/180,
-                    beta=0 * (e2f_duration / (2 * 4)),
+                    beta=0,
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -1829,7 +1831,7 @@ def rabi_population(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
+            coords={"acq_index": i},
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -1847,10 +1849,10 @@ def SNAIL_swap_sched(
     qubit_e: BasicTransmonElement | Iterable[BasicTransmonElement],
     swap_type: Literal['iSWAP', 'bSWAP'],
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
     if hasattr(qubit_specifier, "name"):
         qubits = [qubit_specifier]
@@ -1866,7 +1868,7 @@ def SNAIL_swap_sched(
     
     amps, durations = _broadcast_amp_duration(pulse_amp, pulse_duration)
 
-    schedule = Schedule("SNAIL swap", repetitions)
+    schedule = TimeableSchedule("SNAIL swap", repetitions)
 
     for i, (amp, duration) in enumerate(zip(amps, durations)):
         snail_drive.power(amp)
@@ -1888,8 +1890,8 @@ def SNAIL_swap_sched(
             schedule,
             *qubit_names,
             readout_duration=readout_duration,
-            acq_index=i,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": i},
+            acq_protocol=acq_protocol_name(acq_protocol),
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -1898,7 +1900,7 @@ def SNAIL_swap_sched(
         
     # # Calibration points measured by preparing ground and excited states.
     # schedule.add(Reset(qubit), label="Reset Cal 0")
-    # ro_pulse = schedule.add(Measure(qubit, acq_index=i + 1), label="Calibration 0")
+    # ro_pulse = schedule.add(Measure(qubit, coords={"acq_index": i + 1}), label="Calibration 0")
     # marker_pulse = schedule.add(
     #     MarkerPulse(
     #         duration=8.4e-06,
@@ -1911,7 +1913,7 @@ def SNAIL_swap_sched(
     
     # reset_cal_1 = schedule.add(Reset(qubit), label="Reset Cal 1")
     # schedule.add(X(qubit), ref_op=reset_cal_1, rel_time=0)
-    # ro_pulse = schedule.add(Measure(qubit, acq_index=i + 2), label="Calibration 1")
+    # ro_pulse = schedule.add(Measure(qubit, coords={"acq_index": i + 2}), label="Calibration 1")
     # marker_pulse = schedule.add(
     #     MarkerPulse(
     #         duration=8.4e-06,
@@ -1933,12 +1935,12 @@ def SNAIL_spec_sched(
     qubit: BasicTransmonElement,
     init_duration: float,
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
 
-    schedule = Schedule("signal generator spectroscopy (TWPA)", repetitions)
+    schedule = TimeableSchedule("signal generator spectroscopy (TWPA)", repetitions)
 
     for i, spec_pulse_freq in enumerate(spec_pulse_frequencies):
         snail_drive.frequency(spec_pulse_freq)
@@ -1955,7 +1957,7 @@ def SNAIL_spec_sched(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
+            coords={"acq_index": i},
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -1979,13 +1981,13 @@ def pump_heterodyne_spec_sched_nco(
     init_duration: float = 10e-6,
     repetitions: int = 1,
     port_out: Optional[str] = None,
-) -> Schedule:
+) -> TimeableSchedule:
 
     snail_drive.frequency(pump_frequency)
 
     amps, durations = _broadcast_amp_duration(pump_amp, pump_duration)
     
-    schedule = Schedule("SNAIL pump heterodyne spectroscopy (NCO sweep)(TWPA)", repetitions)
+    schedule = TimeableSchedule("SNAIL pump heterodyne spectroscopy (NCO sweep)(TWPA)", repetitions)
     schedule.add_resource(ClockResource(name=clock, freq=frequencies.flat[0]))
 
     if port_out is None:
@@ -2013,7 +2015,7 @@ def pump_heterodyne_spec_sched_nco(
             schedule.add(IdlePulse(duration=duration))
     
             schedule.add(
-                SetClockFrequency(clock=clock, clock_freq_new=freq),
+                SetClockFrequency(clock=clock, frequency=freq),
                 label=f"set_freq {i} ({clock} {freq:e} Hz)",
             )
     
@@ -2032,7 +2034,7 @@ def pump_heterodyne_spec_sched_nco(
                     duration=integration_time,
                     port=port,
                     clock=clock,
-                    acq_index=i,
+                    coords={"acq_index": i},
                     acq_label=0,
                     ),
                 ref_op=spec_pulse,
@@ -2059,10 +2061,10 @@ def pump_t1_sched(
     qubit_specifier: BasicTransmonElement | Iterable[BasicTransmonElement],
     qubit_e: BasicTransmonElement | Iterable[BasicTransmonElement],
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
     if hasattr(qubit_specifier, "name"):
         qubits = [qubit_specifier]
@@ -2078,7 +2080,7 @@ def pump_t1_sched(
     times = np.asarray(times)
     times = times.reshape(times.shape or (1,))
     
-    schedule = Schedule("Pump T1", repetitions)
+    schedule = TimeableSchedule("Pump T1", repetitions)
 
     for i, tau in enumerate(times):
         reset = schedule.add(Reset(*qubit_names), label=f"Reset {i}")
@@ -2097,8 +2099,8 @@ def pump_t1_sched(
             schedule,
             *qubit_names,
             readout_duration=readout_duration,
-            acq_index=i,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": i},
+            acq_protocol=acq_protocol_name(acq_protocol),
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -2114,10 +2116,10 @@ def pump_ramsey_sched(
     qubit_e: BasicTransmonElement | Iterable[BasicTransmonElement],
     artificial_detuning: float = 0,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
     if hasattr(qubit_specifier, "name"):
         qubits = [qubit_specifier]
@@ -2133,7 +2135,7 @@ def pump_ramsey_sched(
     times = np.asarray(times)
     times = times.reshape(times.shape or (1,))
     
-    schedule = Schedule("Pump Ramsey", repetitions)
+    schedule = TimeableSchedule("Pump Ramsey", repetitions)
 
     for i, tau in enumerate(times):
         reset = schedule.add(Reset(*qubit_names), label=f"Reset {i}")
@@ -2159,8 +2161,8 @@ def pump_ramsey_sched(
             schedule,
             *qubit_names,
             readout_duration=readout_duration,
-            acq_index=i,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": i},
+            acq_protocol=acq_protocol_name(acq_protocol),
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -2176,10 +2178,10 @@ def pump_t1_and_t2_sched(
     qubit_e: BasicTransmonElement | Iterable[BasicTransmonElement],
     case: Union[np.ndarray, int],
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
     repetitions: int = 1,
-) -> Schedule:
+) -> TimeableSchedule:
 
     if hasattr(qubit_specifier, "name"):
         qubits = [qubit_specifier]
@@ -2195,7 +2197,7 @@ def pump_t1_and_t2_sched(
     times = np.asarray(times)
     times = times.reshape(times.shape or (1,))
     
-    schedule = Schedule("Pump T1 and T2", repetitions)
+    schedule = TimeableSchedule("Pump T1 and T2", repetitions)
 
     for i, tau in enumerate(times):
         reset = schedule.add(Reset(*qubit_names), label=f"Reset {i}")
@@ -2211,7 +2213,7 @@ def pump_t1_and_t2_sched(
             
             schedule.add(IdlePulse(duration=38e-9))
 
-            ro_pulse = schedule.add(Measure(*qubit_names, acq_index=i, acq_protocol=acq_protocol), label=f"Measurement {i}")
+            ro_pulse = schedule.add(Measure(*qubit_names, coords={"acq_index": i}, acq_protocol=acq_protocol_name(acq_protocol)), label=f"Measurement {i}")
 
 
         elif case == 2:
@@ -2233,7 +2235,7 @@ def pump_t1_and_t2_sched(
 
             schedule.add(X90(qubit))
 
-            ro_pulse = schedule.add(Measure(qubit, acq_index=i, acq_protocol=acq_protocol), label=f"Measurement {i}")
+            ro_pulse = schedule.add(Measure(qubit, coords={"acq_index": i}, acq_protocol=acq_protocol_name(acq_protocol)), label=f"Measurement {i}")
 
         add_twpa_marker(
             schedule,
@@ -2257,20 +2259,20 @@ def pump_RPM(
     snail_drive: Instrument,
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition"
-    ] = "SSBIntegrationComplex",
+        "IQIntegration", "ThresholdedIQIntegration"
+    ] = "IQIntegration",
     e2f_amp: float | None = None,
     e2f_duration: float | None = None,
-) -> Schedule:
+) -> TimeableSchedule:
     e2f_amp, e2f_duration = _e2f_pulse(e2f_amp, e2f_duration)
 
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     qubit = qubit.name
 
     snail_drive.frequency(pump_frequency)
     snail_drive.power(pump_amp)
     
-    schedule = Schedule(f"Rabi Population Measurement(TWPA)", repetitions)
+    schedule = TimeableSchedule(f"Rabi Population Measurement(TWPA)", repetitions)
 
     for i, angle in enumerate(angles):
         schedule.add(Reset(qubit), label=f"Reset {i}")
@@ -2287,7 +2289,7 @@ def pump_RPM(
                 DRAGPulse(
                     duration=e2f_duration,
                     amplitude=e2f_amp * angle/180,
-                    beta=0 * (e2f_duration / (2 * 4)),
+                    beta=0,
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -2302,7 +2304,7 @@ def pump_RPM(
                 DRAGPulse(
                     duration=e2f_duration,
                     amplitude=e2f_amp * angle/180,
-                    beta=0 * (e2f_duration / (2 * 4)),
+                    beta=0,
                     port=f"{qubit}:fs",
                     clock=f"{qubit}.12",
                     phase=0,
@@ -2318,7 +2320,7 @@ def pump_RPM(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
+            coords={"acq_index": i},
             label=f"Measurement {i}",
             marker_label=f"TWPA_mark {i})",
         )
@@ -2336,15 +2338,15 @@ def cavity_charging(
     init_duration: float = 15e-6,
     repetitions: int = 1,
     acq_protocol: Literal[
-        "SSBIntegrationComplex", "ThresholdedAcquisition", "NumericalSeparatedWeightedIntegration"
-    ] = "SSBIntegrationComplex",
-) -> Schedule:
+        "IQIntegration", "ThresholdedIQIntegration", "NumericalSeparatedWeightedIntegration"
+    ] = "IQIntegration",
+) -> TimeableSchedule:
 
-    readout_duration = qubit.measure.pulse_duration()
-    pi_duration = qubit.rxy.duration()
+    readout_duration = qubit.measure.pulse_duration
+    pi_duration = qubit.rxy.duration
     qubit = qubit.name
     
-    schedule = Schedule("Cavity Charging", repetitions)
+    schedule = TimeableSchedule("Cavity Charging", repetitions)
     schedule.add_resource(ClockResource(name=clock, freq=frequency))
 
     for i, amp in enumerate(pulse_amp):
@@ -2367,8 +2369,8 @@ def cavity_charging(
             schedule,
             qubit,
             readout_duration=readout_duration,
-            acq_index=i,
-            acq_protocol=acq_protocol,
+            coords={"acq_index": i},
+            acq_protocol=acq_protocol_name(acq_protocol),
             ref_pt="end",
             rel_time=5e-6,
             label=f"Measurement {i}",

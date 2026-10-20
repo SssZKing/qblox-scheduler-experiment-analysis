@@ -97,7 +97,7 @@ NCO's `freq x time` frame. The dissertation defines it explicitly:
 and keeps it distinct from what it calls the **real phase**,
 `phi_a = (G_a + S_a) * T_0 + omega_a * t1`, which is what the NCO tracks.
 
-In this schedule `index_to_operation` maps every Clifford to a *physical*
+In this schedule `add_clifford` (formerly `index_to_operation`) maps every Clifford to a *physical*
 `Rxy` (`X180`, `X90`, `Y180`, `Y90`, `mX90`, `mY90`) — there are **no
 virtual-Z gates anywhere in the sequence**. So `c_a = c_b = 0` and the part-1
 swap has nothing to exchange until part 2 or `pump_phase` seeds the register.

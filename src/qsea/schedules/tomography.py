@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
-from qblox_scheduler import Schedule
+from qblox_scheduler.schedules.schedule import TimeableSchedule
 from qblox_scheduler.backends.qblox.constants import MIN_TIME_BETWEEN_OPERATIONS
 from qblox_scheduler.operations import (
     IdlePulse,
@@ -20,7 +20,7 @@ from qsea.schedules import phase as _phase
 from qsea.schedules.clifford.clifford_group import (
     TwoQubitClifford,
 )
-from qsea.schedules.gates import index_to_operation
+from qsea.schedules.gates import add_clifford
 from qsea.schedules.phase import (
     _ac_stark_phases,
     _detuning_residual,
@@ -29,6 +29,7 @@ from qsea.schedules.phase import (
     compute_iswap_t1,
 )
 from qsea.schedules.twpa import max_readout_duration, measure_with_twpa
+from qsea.schedules.acquisition import acq_protocol_name, average_repetitions
 
 if TYPE_CHECKING:
     from qblox_scheduler.device_under_test.transmon_element import (
@@ -79,7 +80,7 @@ def _tomo_setup(qubit_specifier, operation_state_idx, warmup_iswaps=0, warmup_ga
     # What one single-qubit tomography rotation occupies: its leading buffer
     # plus the pulse. Used to pad an all-identity rotation (index 0 below) so
     # every experiment in the set has the same duration.
-    single_qubit_block = operation_buffer_time + max(qubit.rxy.duration() for qubit in qubits)
+    single_qubit_block = operation_buffer_time + max(qubit.rxy.duration for qubit in qubits)
 
     if n == 1:
         tomo_sequence = [15, 16, 0] # index for [mY90, X90, I]
@@ -147,7 +148,7 @@ def _tomo_build(cfg, operation_state_idx, acq_protocol, bin_mode, repetitions,
 
     phase_iter = iter(iswap_phases) if iswap_phases is not None else None
 
-    sched = Schedule(
+    sched = TimeableSchedule(
         "Tomography on " + " and ".join(qubit_names), repetitions=repetitions
     )
 
@@ -158,7 +159,7 @@ def _tomo_build(cfg, operation_state_idx, acq_protocol, bin_mode, repetitions,
 
         for _ in range(cfg["warmup_iswaps"]):
             if cfg["warmup_duration"] is None:
-                sched.add(index_to_operation(qubit_names, operation_buffer_time, clifford_gate_idx=5760))
+                add_clifford(sched, qubit_names, operation_buffer_time, clifford_gate_idx=5760)
             else:
                 # same placement as the iSWAP in index_to_operation: RF lands 26 ns after
                 # the previous operation, followed by the RF-off wait
@@ -168,30 +169,27 @@ def _tomo_build(cfg, operation_state_idx, acq_protocol, bin_mode, repetitions,
         if cfg["warmup_gap"] > 0:
             sched.add(IdlePulse(duration=cfg["warmup_gap"]))
 
-        operation_sched = index_to_operation(qubit_names, operation_buffer_time, operation_state_idx)
-        if operation_sched is not None:
-            sched.add(operation_sched)
+        if add_clifford(sched, qubit_names, operation_buffer_time, operation_state_idx) is not None:
             if phase_iter is not None:
                 theta_q0, theta_q1 = next(phase_iter)
                 sched.add(Rz(qubit=qubit_names[0], theta=theta_q0))
                 sched.add(Rz(qubit=qubit_names[1], theta=theta_q1))
 
-        gate_sched = index_to_operation(
+        add_clifford(
+            sched,
             qubit_names,
             operation_buffer_time,
             tomo_idx,
             idle_duration=single_qubit_block if pad_identity else None,
         )
-        if gate_sched is not None:
-            sched.add(gate_sched)
 
         measure_with_twpa(
             sched,
             *qubit_names,
             readout_duration=cfg["readout_duration"],
-            acq_index=acq_idx,
-            acq_protocol=acq_protocol,
-            bin_mode=bin_mode,
+            coords={"acq_index": acq_idx},
+            acq_protocol=acq_protocol_name(acq_protocol),
+            average_segment_repetitions=average_repetitions(bin_mode),
         )
 
     sched.add(IdlePulse(duration=4e-9))
@@ -203,7 +201,7 @@ def tomography_pre_build(
     operation_state_idx: int,
     quantum_device,
     repetitions: int = 1,
-    acq_protocol: Literal['SSBIntegrationComplex', 'ThresholdedAcquisition'] | str = 'ThresholdedAcquisition',
+    acq_protocol: Literal['IQIntegration', 'ThresholdedIQIntegration'] | str = 'ThresholdedIQIntegration',
     bin_mode: Literal['average', 'append'] | str = 'append',
     pad_identity: bool = True,
     warmup_iswaps: int = 0,
@@ -247,9 +245,9 @@ def tomography_pre_build(
     if cfg["n_iswap_per_op"] > 1:
         raise NotImplementedError(
             f"Clifford {operation_state_idx} decomposes to {cfg['n_iswap_per_op']} iSWAPs. "
-            "The correction is inserted after the whole gate subschedule, which is "
+            "The correction is inserted after the whole gate, which is "
             "only equivalent for a single iSWAP; interleaving would require changing "
-            "index_to_operation."
+            "add_clifford."
         )
 
     sched = _tomo_build(cfg, operation_state_idx, acq_protocol, bin_mode,
@@ -284,7 +282,7 @@ def tomography_schedule(
     operation_state_idx: int,
     repetitions: int = 1,
     instrument_coordinator=None,
-    acq_protocol: Literal['SSBIntegrationComplex', 'ThresholdedAcquisition'] | str = 'ThresholdedAcquisition',
+    acq_protocol: Literal['IQIntegration', 'ThresholdedIQIntegration'] | str = 'ThresholdedIQIntegration',
     bin_mode: Literal['average', 'append'] | str = 'append',
     quantum_device=None,
     correction_phase: np.ndarray | None = None,
@@ -416,7 +414,7 @@ def _qpt_setup(qubit_specifier, operation_state_idx, experiment_list, identity_r
     # What one single-qubit tomography rotation occupies: its leading buffer
     # plus the pulse. Used to pad an all-identity rotation so every experiment
     # in the set has the same duration (see ``pad_identity``).
-    single_qubit_block = operation_buffer_time + max(qubit.rxy.duration() for qubit in qubits)
+    single_qubit_block = operation_buffer_time + max(qubit.rxy.duration for qubit in qubits)
 
     if n == 1:
         tomo_sequence = [0, 3, 21, 15, 13, 16] # index for [I, X180, Y90, mY90, mX90, X90]
@@ -489,17 +487,16 @@ def _qpt_build(cfg, operation_state_idx, identity_reference, acq_protocol,
 
     def _add_rotation(sched, clifford_idx):
         """Add one tomography rotation, padding a pure identity to match."""
-        rotation = index_to_operation(
+        add_clifford(
+            sched,
             qubit_names,
             operation_buffer_time,
             clifford_idx,
             idle_duration=single_qubit_block if pad_identity else None,
         )
-        if rotation is not None:
-            sched.add(rotation)
 
     phase_iter = iter(iswap_phases) if iswap_phases is not None else None
-    sched = Schedule(
+    sched = TimeableSchedule(
         "QPT idx " + str(operation_state_idx) + " on " + " and ".join(qubit_names),
         repetitions=repetitions,
     )
@@ -515,9 +512,7 @@ def _qpt_build(cfg, operation_state_idx, identity_reference, acq_protocol,
         _add_rotation(sched, tomo_sequence[prep_idx])
 
         if not identity_reference or acq_idx % 2 == 0:
-            operation_sched = index_to_operation(qubit_names, operation_buffer_time, operation_state_idx)
-            if operation_sched is not None:
-                sched.add(operation_sched)
+            if add_clifford(sched, qubit_names, operation_buffer_time, operation_state_idx) is not None:
                 if phase_iter is not None:
                     theta_q0, theta_q1 = next(phase_iter)
                     sched.add(Rz(qubit=qubit_names[0], theta=theta_q0))
@@ -529,9 +524,9 @@ def _qpt_build(cfg, operation_state_idx, identity_reference, acq_protocol,
             sched,
             *qubit_names,
             readout_duration=cfg["readout_duration"],
-            acq_index=acq_idx,
-            acq_protocol=acq_protocol,
-            bin_mode=bin_mode,
+            coords={"acq_index": acq_idx},
+            acq_protocol=acq_protocol_name(acq_protocol),
+            average_segment_repetitions=average_repetitions(bin_mode),
         )
 
     sched.add(IdlePulse(duration=4e-9))
@@ -545,7 +540,7 @@ def process_tomography_pre_build(
     quantum_device,
     repetitions: int = 1,
     identity_reference: bool = False,
-    acq_protocol: Literal['SSBIntegrationComplex', 'ThresholdedAcquisition'] | str = 'ThresholdedAcquisition',
+    acq_protocol: Literal['IQIntegration', 'ThresholdedIQIntegration'] | str = 'ThresholdedIQIntegration',
     bin_mode: Literal['average', 'append'] | str = 'append',
     pad_identity: bool = True,
 ) -> np.ndarray:
@@ -589,9 +584,9 @@ def process_tomography_pre_build(
     if cfg["n_iswap_per_op"] > 1:
         raise NotImplementedError(
             f"Clifford {operation_state_idx} decomposes to {cfg['n_iswap_per_op']} iSWAPs. "
-            "The correction is inserted after the whole gate subschedule, which is "
+            "The correction is inserted after the whole gate, which is "
             "only equivalent for a single iSWAP; interleaving would require changing "
-            "index_to_operation."
+            "add_clifford."
         )
 
     sched = _qpt_build(cfg, operation_state_idx, identity_reference, acq_protocol,
@@ -623,7 +618,7 @@ def process_tomography_schedule(
     repetitions: int = 1,
     identity_reference: bool = False,
     instrument_coordinator=None,
-    acq_protocol: Literal['SSBIntegrationComplex', 'ThresholdedAcquisition'] | str = 'ThresholdedAcquisition',
+    acq_protocol: Literal['IQIntegration', 'ThresholdedIQIntegration'] | str = 'ThresholdedIQIntegration',
     bin_mode: Literal['average', 'append'] | str = 'append',
     quantum_device=None,
     correction_phase: np.ndarray | None = None,

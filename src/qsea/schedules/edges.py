@@ -5,6 +5,10 @@ package alone. The gate itself (``iSWAP(qC, qT)``) lives in
 ``qsea.schedules.two_qubit``; this edge tells the compiler to play it as a
 marker on ``snail:switch`` that gates the pump generator.
 
+In qblox-scheduler the edge is a pydantic model (like qblox-applications'
+``CompositeSquareEdge``) instead of a qcodes instrument, so its parameters are
+plain attributes: ``edge.iswap.pulse_duration = 400e-9``.
+
 Usage::
 
     from qsea.schedules.edges import CompositeiSWAPEdge
@@ -14,18 +18,10 @@ Usage::
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Literal
 
-from qcodes.instrument import InstrumentChannel
-from qcodes.parameters import ManualParameter
-
-from qblox_scheduler.device_under_test.edge import Edge
-from qblox_scheduler.helpers.validators import Numbers
+from qblox_scheduler import Edge, Numbers, OperationCompilationConfig, Parameter, SchedulerSubmodule
 from qblox_scheduler.operations import pulse_library
-from qblox_scheduler import OperationCompilationConfig
-
-if TYPE_CHECKING:
-    from qcodes.instrument.base import InstrumentBase
 
 __all__ = ["composite_marker_pulse", "iSWAPChannel", "CompositeiSWAPEdge"]
 
@@ -50,65 +46,52 @@ def composite_marker_pulse(
     return composite_pulse
 
 
-class iSWAPChannel(InstrumentChannel):
+class iSWAPChannel(SchedulerSubmodule):
     """Submodule containing parameters for performing a iSWAP operation.
 
     Named iSWAPChannel (not iSWAP) so that ``from qsea.schedules.two_qubit
     import *`` -- which exports the iSWAP gate Operation(qC, qT) -- cannot shadow it.
     """
 
-    def __init__(self, parent: InstrumentBase, name: str, **kwargs: float) -> None:
-        super().__init__(parent=parent, name=name)
+    pulse_frequency: float = Parameter(
+        docstring=r"""The pulse frequency in Hz.""",
+        unit="Hz",
+        initial_value=500e6,
+        vals=Numbers(min_value=0, max_value=2000e6, allow_nan=True),
+    )
 
-        self.pulse_frequency = ManualParameter(
-            "pulse_frequency",
-            docstring=r"""The pulse frequency in Hz.""",
-            unit="Hz",
-            initial_value=kwargs.get("pulse_frequency", 500e6),
-            vals=Numbers(min_value=0, max_value=2000e6, allow_nan=True),
-            instrument=self,
-        )
+    pulse_amp: float = Parameter(
+        docstring=r"""Amplitude of the pulse envelope.""",
+        unit="dBm",
+        initial_value=0.0,
+        vals=Numbers(min_value=-100, max_value=30, allow_nan=True),
+    )
 
-        self.pulse_amp = ManualParameter(
-            "pulse_amp",
-            docstring=r"""Amplitude of the pulse envelope.""",
-            unit="dBm",
-            initial_value=kwargs.get("pulse_amp", 0.0),
-            vals=Numbers(min_value=-100, max_value=30, allow_nan=True),
-            instrument=self,
-        )
+    pulse_duration: float = Parameter(
+        docstring=r"""The pulse duration in seconds.""",
+        unit="s",
+        initial_value=1e-6,
+        vals=Numbers(min_value=0, max_value=500e-6, allow_nan=True),
+    )
 
-        self.pulse_duration = ManualParameter(
-            "pulse_duration",
-            docstring=r"""The pulse duration in seconds.""",
-            unit="s",
-            initial_value=kwargs.get("pulse_duration", 1e-6),
-            vals=Numbers(min_value=0, max_value=500e-6, allow_nan=True),
-            instrument=self,
-        )
+    # Per-iSWAP AC-Stark phases (dissertation 4.3.2 part 3). Read by
+    # qsea.schedules.two_qubit._ac_stark_phases and carried in
+    # the virtual-Z register of _iswap_rz_corrections. The difference
+    # q1 - q2 also absorbs the pump phase phi_p, so it is only valid for
+    # the pump frequency/phase it was calibrated at.
+    ac_stark_phase_q1: float = Parameter(
+        docstring=r"""AC-Stark phase correction of qubit1 (the parent element) per iSWAP, in degrees.""",
+        unit="deg",
+        initial_value=0.0,
+        vals=Numbers(min_value=-720, max_value=720, allow_nan=True),
+    )
 
-        # Per-iSWAP AC-Stark phases (dissertation 4.3.2 part 3). Read by
-        # qsea.schedules.two_qubit._ac_stark_phases and carried in
-        # the virtual-Z register of _iswap_rz_corrections. The difference
-        # q1 - q2 also absorbs the pump phase phi_p, so it is only valid for
-        # the pump frequency/phase it was calibrated at.
-        self.ac_stark_phase_q1 = ManualParameter(
-            "ac_stark_phase_q1",
-            docstring=r"""AC-Stark phase correction of qubit1 (the parent element) per iSWAP, in degrees.""",
-            unit="deg",
-            initial_value=kwargs.get("ac_stark_phase_q1", 0.0),
-            vals=Numbers(min_value=-720, max_value=720, allow_nan=True),
-            instrument=self,
-        )
-
-        self.ac_stark_phase_q2 = ManualParameter(
-            "ac_stark_phase_q2",
-            docstring=r"""AC-Stark phase correction of qubit2 (the child element) per iSWAP, in degrees.""",
-            unit="deg",
-            initial_value=kwargs.get("ac_stark_phase_q2", 0.0),
-            vals=Numbers(min_value=-720, max_value=720, allow_nan=True),
-            instrument=self,
-        )
+    ac_stark_phase_q2: float = Parameter(
+        docstring=r"""AC-Stark phase correction of qubit2 (the child element) per iSWAP, in degrees.""",
+        unit="deg",
+        initial_value=0.0,
+        vals=Numbers(min_value=-720, max_value=720, allow_nan=True),
+    )
 
 
 class CompositeiSWAPEdge(Edge):
@@ -120,29 +103,16 @@ class CompositeiSWAPEdge(Edge):
     parameters live in the ``iswap`` submodule (:class:`iSWAPChannel`).
     """
 
-    def __init__(
-        self,
-        parent_element_name: str,
-        child_element_name: str,
-        **kwargs,
-    ) -> None:
-        iswap_data = kwargs.pop("iswap", {})
+    edge_type: Literal["CompositeiSWAPEdge"] = "CompositeiSWAPEdge"  # type: ignore[reportIncompatibleVariableOverride]
 
-        super().__init__(
-            parent_element_name=parent_element_name,
-            child_element_name=child_element_name,
-            **kwargs,
-        )
-
-        self.add_submodule("iswap", iSWAPChannel(parent=self, name="iswap", **iswap_data))
-
+    iswap: iSWAPChannel
 
     def generate_edge_config(self) -> dict[str, dict[str, OperationCompilationConfig]]:
         """
         Generate valid device config.
 
-        Fills in the edges information to produce a valid device config for the
-        quantify-scheduler making use of the
+        Fills in the edges information to produce a valid device config for
+        qblox-scheduler making use of the
         :func:`~.circuit_to_device.compile_circuit_to_device_with_config_validation` function.
         """
         edge_op_config = {
@@ -150,9 +120,9 @@ class CompositeiSWAPEdge(Edge):
                 "iSWAP": OperationCompilationConfig(
                     factory_func=composite_marker_pulse,
                     factory_kwargs={
-                        "pulse_frequency": self.iswap.pulse_frequency(),
-                        "pulse_amp": self.iswap.pulse_amp(),
-                        "pulse_duration": self.iswap.pulse_duration(),
+                        "pulse_frequency": self.iswap.pulse_frequency,
+                        "pulse_amp": self.iswap.pulse_amp,
+                        "pulse_duration": self.iswap.pulse_duration,
                     },
                 ),
             }

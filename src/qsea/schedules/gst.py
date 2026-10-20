@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
-from qblox_scheduler import Schedule
+from qblox_scheduler.schedules.schedule import TimeableSchedule
 from qblox_scheduler.backends.qblox.constants import MIN_TIME_BETWEEN_OPERATIONS
 from qblox_scheduler.operations import (
     X90,
@@ -28,6 +28,7 @@ from qsea.schedules.phase import (
     compute_iswap_t1,
 )
 from qsea.schedules.twpa import max_readout_duration, measure_with_twpa
+from qsea.schedules.acquisition import acq_protocol_name, average_repetitions
 
 if TYPE_CHECKING:
     from qblox_scheduler.device_under_test.transmon_element import (
@@ -189,9 +190,13 @@ def pygsti_circuit_to_operation(
     idle_duration: float,
     pygsti_circuit,
     iswap_phase_iter=None,
- ) -> Schedule | None:
+ ) -> TimeableSchedule | None:
     """
-    Convert a pyGSTi circuit into a Quantify Schedule of physical operations.
+    Convert a pyGSTi circuit into a TimeableSchedule of physical operations.
+
+    Kept for code written for qqea. Added to another schedule as a sub-schedule, an iSWAP
+    in it loses its pump lead and starts 94 ns late, so schedule builders use
+    :func:`add_pygsti_circuit` instead (see :func:`qsea.schedules.gates.add_layers`).
 
     This function maps the output of ``pygsti_circuit_to_gate_decomposition`` to Quantify
     operations and assembles them into a schedule with timing constraints for
@@ -206,7 +211,7 @@ def pygsti_circuit_to_operation(
         Buffer time (in seconds) to insert between operations in the schedule.
     idle_duration : float
         Pulse duration used for the "I" (idle) gate. Same derivation as process
-        tomography's ``single_qubit_block`` -- ``max(qubit.rxy.duration() for
+        tomography's ``single_qubit_block`` -- ``max(qubit.rxy.duration for
         qubit in qubits)`` -- computed by the caller (see ``_gst_setup``) rather
         than passed in as a free-standing, externally-configurable argument.
         ``operation_buffer_time`` is NOT folded in here, unlike
@@ -224,8 +229,8 @@ def pygsti_circuit_to_operation(
 
     Returns
     -------
-    Schedule | None
-        A Quantify Schedule object containing the physical operations for the circuit,
+    TimeableSchedule | None
+        A TimeableSchedule containing the physical operations for the circuit,
         or None if the decomposition results in no operations.
 
     Raises
@@ -234,6 +239,21 @@ def pygsti_circuit_to_operation(
         If the number of qubits is not 1 or 2.
 
     """
+    gate_sched = TimeableSchedule()
+    if add_pygsti_circuit(gate_sched, qubit_names, operation_buffer_time, idle_duration,
+                          pygsti_circuit, iswap_phase_iter) is None:
+        return None
+    return gate_sched
+
+
+def _circuit_layers(
+    qubit_names: list[str],
+    operation_buffer_time: float,
+    idle_duration: float,
+    pygsti_circuit,
+    iswap_phase_iter=None,
+):
+    """The gate layers of a pyGSTi circuit, as ``(qubits, [(operation, rel_time), ...])``."""
     if len(qubit_names) not in (1, 2):
         raise NotImplementedError
     # ---- PycQED mappings ----#
@@ -251,10 +271,7 @@ def pygsti_circuit_to_operation(
         "iSWAP": lambda q: iSWAP(qC=pycqed_qubit_map[q[0]], qT=pycqed_qubit_map[q[1]]),
     }
     gate_decomp = pygsti_circuit_to_gate_decomposition(pygsti_circuit)
-    # gate_decomp = TwoQubitClifford(6565).gate_decomposition()
-    gate_sched = Schedule()
-    ref_op = gate_sched.add(IdlePulse(0.0))
-    ref_ops = [ref_op, ref_op]
+    layers = []
     # True while the last emitted layer was an iSWAP with no single-qubit layer since.
     prev_layer_iswap = False
 
@@ -268,8 +285,7 @@ def pygsti_circuit_to_operation(
                     "for a multi-qubit circuit."
                 )
 
-        subsched = Schedule()
-        subsched.add(IdlePulse(0.0))
+        ops = []
         for gate in gates:
             if gate not in pycqed_operation_map:
                 raise ValueError(f"Unsupported gate in decomposition: {gate}")
@@ -277,9 +293,9 @@ def pygsti_circuit_to_operation(
             if op is not None:
                 if gate == 'iSWAP':
                     if prev_layer_iswap and _gates.ISWAP_CONSECUTIVE_GAP > 0:
-                        subsched.add(IdlePulse(duration=_gates.ISWAP_CONSECUTIVE_GAP))
-                    subsched.add(op, rel_time=26e-9-_gates.iSWAP_DELAY)
-                    subsched.add(IdlePulse(duration=_gates.iSWAP_DELAY + _gates.ISWAP_SETTLE))
+                        ops.append((IdlePulse(duration=_gates.ISWAP_CONSECUTIVE_GAP), None))
+                    ops.append((op, 26e-9-_gates.iSWAP_DELAY))
+                    ops.append((IdlePulse(duration=_gates.iSWAP_DELAY + _gates.ISWAP_SETTLE), None))
                     # Address the pair by qubit_names, NOT by qubits[0]/[1]: the
                     # latter follows the gate label's argument order, so a
                     # "Giswap:1:0" would put the correction on the wrong qubits.
@@ -289,35 +305,42 @@ def pygsti_circuit_to_operation(
                     # deliberately no separate constant AC_STARK Rz here.
                     if iswap_phase_iter is not None:
                         theta_q0, theta_q1 = next(iswap_phase_iter)
-                        subsched.add(Rz(qubit=qubit_names[0], theta=theta_q0))
-                        subsched.add(Rz(qubit=qubit_names[1], theta=theta_q1))
+                        ops.append((Rz(qubit=qubit_names[0], theta=theta_q0), None))
+                        ops.append((Rz(qubit=qubit_names[1], theta=theta_q1), None))
                 else:
-                    subsched.add(op, rel_time=operation_buffer_time)
-        if len(subsched.operations) == 1:
-            # no gates added, only the initial IdlePulse
+                    ops.append((op, operation_buffer_time))
+        if not ops:
             continue
         # Any single-qubit layer (an explicit "I" idle included) separates two iSWAPs by
         # at least one gate slot, so only back-to-back iSWAP layers get the extra gap.
         prev_layer_iswap = len(qubits) == 2 and "iSWAP" in gates
-        if qubits == ("q0",):
-            schedulable = gate_sched.add(subsched, ref_op=ref_ops[0])
-            ref_ops[0] = schedulable
-        elif qubits == ("q1",):
-            # FIXME: this relies on the fact that single qubit Clifford are ALWAYS defined for both, and ALWAYS in the order q0, q1
-            schedulable = gate_sched.add(subsched, ref_op=ref_ops[0], ref_pt="start")
-            ref_ops[1] = schedulable
-        elif qubits in [("q0", "q1"), ("q1", "q0")]:
-            schedulable = gate_sched.add(subsched, ref_op=ref_ops[0])
-            # Synchronise against q1's chain too -- the add() above only
-            # references q0's. rel_time is 0, NOT operation_buffer_time: the
-            # buffer is already applied inside subsched (rel_time on the op
-            # itself), so passing it here again stacks on top of it and puts
-            # 2 x operation_buffer_time in front of the gate.
-            schedulable.add_timing_constraint(0, ref_ops[1])
-            ref_ops = [schedulable, schedulable]
-    if len(gate_sched.operations) == 1:
-        return None
-    return gate_sched
+        layers.append((qubits, ops))
+    return layers
+
+
+def add_pygsti_circuit(
+    sched: TimeableSchedule,
+    qubit_names: list[str],
+    operation_buffer_time: float,
+    idle_duration: float,
+    pygsti_circuit,
+    iswap_phase_iter=None,
+    *,
+    ref_op=None,
+    ref_pt: str | None = None,
+    rel_time: float = 0.0,
+):
+    """Add the physical operations of a pyGSTi circuit to ``sched``.
+
+    Same operations and timing as :func:`pygsti_circuit_to_operation`, but added to
+    ``sched`` itself rather than as a sub-schedule, which keeps the iSWAP pump lead (see
+    :func:`qsea.schedules.gates.add_layers`). Returns the end of the circuit, or None if
+    it has no operations.
+    """
+    layers = _circuit_layers(
+        qubit_names, operation_buffer_time, idle_duration, pygsti_circuit, iswap_phase_iter
+    )
+    return _gates.add_layers(sched, layers, ref_op=ref_op, ref_pt=ref_pt, rel_time=rel_time)
 
 
 def _gst_setup(qubit_specifier, experiment_list):
@@ -342,10 +365,10 @@ def _gst_setup(qubit_specifier, experiment_list):
     operation_buffer_time = [0.0, MIN_TIME_BETWEEN_OPERATIONS * 4e-9][n - 1]
 
     # "I"-gate pulse duration -- same derivation as process tomography's
-    # single_qubit_block (max(qubit.rxy.duration() for qubit in qubits)), but
+    # single_qubit_block (max(qubit.rxy.duration for qubit in qubits)), but
     # without its operation_buffer_time addend: pygsti_circuit_to_operation
     # already applies that separately, the same way, to every gate including "I".
-    idle_duration = max(qubit.rxy.duration() for qubit in qubits)
+    idle_duration = max(qubit.rxy.duration for qubit in qubits)
 
     experiment_list = list(experiment_list)
     n_iswap_per_circuit = [
@@ -383,7 +406,7 @@ def _gst_build(cfg, acq_protocol, bin_mode, repetitions, iswap_phases=None):
 
     phase_iter = iter(iswap_phases) if iswap_phases is not None else None
 
-    sched = Schedule(
+    sched = TimeableSchedule(
         "GST on " + " and ".join(qubit_names), repetitions=repetitions
     )
 
@@ -392,23 +415,22 @@ def _gst_build(cfg, acq_protocol, bin_mode, repetitions, iswap_phases=None):
         for qubit_name in qubit_names:
             sched.add(ResetClockPhase(clock=f"{qubit_name}.01"), ref_op=qubit_reset, ref_pt="end")
 
-        operation_sched = pygsti_circuit_to_operation(
+        add_pygsti_circuit(
+            sched,
             qubit_names=qubit_names,
             operation_buffer_time=operation_buffer_time,
             idle_duration=idle_duration,
             pygsti_circuit=experiment_circuit,
             iswap_phase_iter=phase_iter,
         )
-        if operation_sched is not None:
-            sched.add(operation_sched)
 
         measure_with_twpa(
             sched,
             *qubit_names,
             readout_duration=cfg["readout_duration"],
-            acq_index=acq_idx,
-            acq_protocol=acq_protocol,
-            bin_mode=bin_mode,
+            coords={"acq_index": acq_idx},
+            acq_protocol=acq_protocol_name(acq_protocol),
+            average_segment_repetitions=average_repetitions(bin_mode),
         )
 
     sched.add(IdlePulse(duration=4e-9))
@@ -420,7 +442,7 @@ def GST_pre_build(
     experiment_list: Iterable,
     quantum_device,
     repetitions: int = 1,
-    acq_protocol: Literal['SSBIntegrationComplex', 'ThresholdedAcquisition'] | str = 'ThresholdedAcquisition',
+    acq_protocol: Literal['IQIntegration', 'ThresholdedIQIntegration'] | str = 'ThresholdedIQIntegration',
     bin_mode: Literal['average', 'append'] | str = 'append',
 ) -> np.ndarray:
     """
@@ -499,7 +521,7 @@ def GST_schedule(
     instrument_coordinator=None,
     quantum_device=None,
     correction_phase: np.ndarray | None = None,
-    acq_protocol: Literal['SSBIntegrationComplex', 'ThresholdedAcquisition'] | str = 'ThresholdedAcquisition',
+    acq_protocol: Literal['IQIntegration', 'ThresholdedIQIntegration'] | str = 'ThresholdedIQIntegration',
     bin_mode: Literal['average', 'append'] | str = 'append',
 ):
     """

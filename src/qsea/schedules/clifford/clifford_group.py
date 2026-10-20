@@ -377,7 +377,7 @@ class SingleQubitClifford(Clifford):
     @classmethod
     def _get_clifford_id(cls, pauli_transfer_matrix: np.ndarray) -> int:
         """Return the unique Id of a Clifford."""
-        unique_hash = crc32(pauli_transfer_matrix.astype(int))
+        unique_hash = crc32(pauli_transfer_matrix.astype(np.int32))
 
         if cls._hash_table is None:
             cls._hash_table = get_single_qubit_clifford_hash_table()
@@ -468,7 +468,7 @@ class SingleQubitClifford(Clifford):
 #     @classmethod
 #     def _get_clifford_id(cls, pauli_transfer_matrix: np.ndarray) -> int:
 #         """Return the unique Id of a Clifford."""
-#         unique_hash = crc32(pauli_transfer_matrix.astype(int))
+#         unique_hash = crc32(pauli_transfer_matrix.astype(np.int32))
 
 #         if cls._hash_table is None:
 #             cls._hash_table = get_two_qubit_clifford_hash_table()
@@ -714,7 +714,7 @@ class TwoQubitClifford(Clifford):
     @classmethod
     def _get_clifford_id(cls, pauli_transfer_matrix: np.ndarray) -> int:
         """Return the unique Id of a Clifford."""
-        unique_hash = crc32(pauli_transfer_matrix.astype(int))
+        unique_hash = crc32(pauli_transfer_matrix.astype(np.int32))
 
         if cls._hash_table is None:
             cls._hash_table = get_two_qubit_clifford_hash_table()
@@ -906,7 +906,7 @@ def construct_clifford_lookuptable(generator: type[Clifford], indices: Iterable[
     for idx in indices:
         clifford = generator(idx=idx)
         # important to use crc32 hashing as this is a non-random hash
-        hash_val = crc32(clifford.pauli_transfer_matrix.round().astype(int))
+        hash_val = crc32(clifford.pauli_transfer_matrix.round().astype(np.int32))
         lookuptable.append(hash_val)
     return lookuptable
 

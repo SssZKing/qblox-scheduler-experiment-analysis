@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from qblox_scheduler import Schedule
+from qblox_scheduler.schedules.schedule import TimeableSchedule
 
 from qsea.schedules import gates as _gates
 
@@ -66,7 +66,7 @@ def _detuning_residual(qubits, quantum_device) -> float:
         )
     pump_freq = edges[edge_name]["iSWAP"].factory_kwargs["pulse_frequency"]
 
-    detuning = qubits[0].clock_freqs.f01() - qubits[1].clock_freqs.f01()
+    detuning = qubits[0].clock_freqs.f01 - qubits[1].clock_freqs.f01
     return detuning - math.copysign(pump_freq, detuning)
 
 
@@ -104,9 +104,9 @@ def _ac_stark_phases(qubits, quantum_device) -> tuple[float, float]:
             edge = quantum_device.get_edge(edge_name)
         except KeyError:
             continue
-        iswap_params = edge.iswap.parameters
-        if "ac_stark_phase_q1" in iswap_params and "ac_stark_phase_q2" in iswap_params:
-            phases = (iswap_params["ac_stark_phase_q1"](), iswap_params["ac_stark_phase_q2"]())
+        iswap = getattr(edge, "iswap", None)
+        if hasattr(iswap, "ac_stark_phase_q1") and hasattr(iswap, "ac_stark_phase_q2"):
+            phases = (iswap.ac_stark_phase_q1, iswap.ac_stark_phase_q2)
             return phases[::-1] if swapped else phases
         break
     print(
@@ -186,7 +186,7 @@ def _iswap_rz_corrections(
     return corrections
 
 
-def compute_iswap_t1(sched: Schedule, quantum_device) -> list[float]:
+def compute_iswap_t1(sched: TimeableSchedule, quantum_device) -> list[float]:
     """
     Compile ``sched`` and return, for every iSWAP occurrence, the elapsed
     time in seconds since the most recent preceding ``ResetClockPhase`` in
