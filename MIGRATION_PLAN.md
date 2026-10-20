@@ -107,8 +107,9 @@ Decided:
 Pending input:
 - Lab hardware config and device setup (snapshot or the notebook code that builds it): provided later by the user. Needed from phase 3; phases 0–2 do not depend on it.
 
+Still open:
 
-- **Sweep style (verified on a dummy cluster)**: inside `Schedule.loop`, a body of only pulses and acquisitions compiles to one real-time loop on the cluster. A body containing `SetParameter(qcodes_param, var)` or `Callback(fn, var)` runs as a Python loop: one parameter set and one compiled sub-schedule per point, with any inner pulse-only loop still real-time. The result is one flat dataset (`acq_index_0`) with the swept values as coords; reshape it with `qblox_applications...analysis.helpers.acq_coords_to_dims`. `Callback` needs a module-level function (it is stored by import path; lambdas and closures fail).
+- **How sweeps run (verified on a dummy cluster, for reference)**: inside `Schedule.loop`, a body of only pulses and acquisitions compiles to one real-time loop on the cluster. A body containing `SetParameter(qcodes_param, var)` or `Callback(fn, var)` runs as a Python loop: one parameter set and one compiled sub-schedule per point, with any inner pulse-only loop still real-time. The result is one flat dataset (`acq_index_0`) with the swept values as coords; reshape it with `qblox_applications...analysis.helpers.acq_coords_to_dims`. `Callback` needs a module-level function (it is stored by import path; lambdas and closures fail).
 - **qblox-applications**: not on PyPI, no tags yet. It is pinned to a commit; switch to a PyPI release once one exists.
 - **Firmware upgrade timing**: who does it, and when the reference data from `qblox_env` gets taken.
 - **Python 3.12 on the lab PC**: confirm conda can install it there (any Python ≥ 3.11 works with these pins).
