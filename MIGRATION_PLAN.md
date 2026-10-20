@@ -99,11 +99,16 @@ Each phase ends with tests green in `qbs_env`. Phases 1–5 need no hardware.
 
 ## 6. Open questions
 
-Decided: package name `qsea`; keep `quantify-core` 0.9.1 for analysis for now (long-term library deferred).
+Decided:
+- Package name `qsea`.
+- Keep `quantify-core` 0.9.1 for analysis for now (long-term library deferred).
+- Sweeps: hardware loops (`Schedule.loop`) wherever the swept quantity is a schedule parameter; `SetParameter`/`Callback` software loops only for external instruments (HP83732B, LOs).
+
+Pending input:
+- Lab hardware config and device setup (snapshot or the notebook code that builds it): provided later by the user. Needed from phase 3; phases 0–2 do not depend on it.
 
 
 - **Sweep style (verified on a dummy cluster)**: inside `Schedule.loop`, a body of only pulses and acquisitions compiles to one real-time loop on the cluster. A body containing `SetParameter(qcodes_param, var)` or `Callback(fn, var)` runs as a Python loop: one parameter set and one compiled sub-schedule per point, with any inner pulse-only loop still real-time. The result is one flat dataset (`acq_index_0`) with the swept values as coords; reshape it with `qblox_applications...analysis.helpers.acq_coords_to_dims`. `Callback` needs a module-level function (it is stored by import path; lambdas and closures fail).
-- **Sweep style**: port each node as a hardware loop (`Schedule.loop`, faster, the native way) or keep software sweeps by running one `HardwareAgent.run` per point? Proposed: hardware loops wherever the swept quantity is a schedule parameter. Software loops only for external instruments (HP83732B TWPA pump power/frequency, LO sweeps).
 - **qblox-applications**: not on PyPI, no tags yet. It is pinned to a commit; switch to a PyPI release once one exists.
 - **Firmware upgrade timing**: who does it, and when the reference data from `qblox_env` gets taken.
 - **Python 3.12 on the lab PC**: confirm conda can install it there (any Python ≥ 3.11 works with these pins).
