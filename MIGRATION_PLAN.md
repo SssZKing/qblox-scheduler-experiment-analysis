@@ -3,7 +3,7 @@
 Source: [qblox-quantify-experiment-analysis](https://github.com/SssZKing/qblox-quantify-experiment-analysis) (`qqea`, 17.5k lines).
 Target: this repo, running in a new standalone env `qbs_env`. The lab PC `qblox_env` stays as it is.
 
-Status: plan only. No code has been ported yet. Everything marked *verified* below was run on 2026-10-20 (Linux, Python 3.12, and Python 3.9 for the `qblox_env` read check).
+Status: phase 1 done (`qsea` scaffold, `fitting/`, `tomography/`; tests pass in `qbs_env` pins). Phase 2 in progress. Everything marked *verified* below was run on 2026-10-20 (Linux, Python 3.12, and Python 3.9 for the `qblox_env` read check).
 
 ## 1. Decisions
 

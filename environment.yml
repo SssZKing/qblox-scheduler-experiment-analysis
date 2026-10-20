@@ -13,3 +13,4 @@ dependencies:
   - git   # qblox-applications is installed from GitLab, not PyPI
   - pip:
       - -r requirements/qbs_env-win-py312.txt
+      - -e .   # qsea itself; its dependencies are already satisfied by the lock above

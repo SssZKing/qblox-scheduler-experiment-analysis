@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qblox-scheduler-experiment-analysis"
+version = "0.1.0"
+description = "Qblox/qblox-scheduler experiment schedules, calibration nodes and analysis tools (RB, state/process tomography, GST)"
+readme = "README.md"
+requires-python = ">=3.11"  # qbs_env runs 3.12
+license = {text = "MIT"}
+authors = [{name = "Zhuo Shen"}]
+urls = {Repository = "https://github.com/SssZKing/qblox-scheduler-experiment-analysis"}
+keywords = ["qblox", "qblox-scheduler", "superconducting qubits", "transmon", "randomized benchmarking", "tomography", "gate set tomography"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+# Pinned to qbs_env (requirements/qbs_env.in, full lock in requirements/qbs_env-win-py312.txt);
+# MIGRATION_PLAN.md explains the qcodes and xarray caps.
+dependencies = [
+    "numpy==2.5.4",
+    "scipy==1.18.1",
+    "matplotlib==3.11.2",
+    "xarray==2026.2.0",
+    "lmfit==1.3.4",
+    "qutip==5.3.1",
+    "pygsti==0.10.2",
+    "scikit-rf==2.2.0",
+    "qcodes==0.56.0",
+    "qblox-instruments==1.4.1",
+    "qblox-scheduler==1.0.1",
+    "qblox-applications @ git+https://gitlab.com/qblox/packages/software/qblox-applications.git@771b6c4ba0820a9659760fd80bf2330dd5848b2b",
+    "quantify-core==0.9.1",
+    "typing_extensions==4.16.0",
+]
+
+[project.optional-dependencies]
+notebooks = ["jupyter", "ipympl", "tqdm"]
+test = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"qsea.tomography" = ["pmatrix.npy"]
