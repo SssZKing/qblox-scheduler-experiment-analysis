@@ -1,0 +1,29 @@
+# Top-level requirements for qbs_env (Python 3.12). The full pinned set for the
+# lab PC is qbs_env-win-py312.txt, regenerated from this file with:
+#   uv pip compile requirements/qbs_env.in --python-version 3.12 --python-platform windows \
+#       -o requirements/qbs_env-win-py312.txt --no-header
+
+# Experiment side
+qblox-scheduler[cli]==1.0.1   # [cli] adds the `qblox-scheduler migrate-scripts` tool
+qblox-instruments==1.4.1
+# BasicTransmonElement, CompositeSquareEdge and the analysis classes moved here; not on PyPI
+qblox-applications @ git+https://gitlab.com/qblox/packages/software/qblox-applications.git@771b6c4ba0820a9659760fd80bf2330dd5848b2b
+
+# Analysis side
+quantify-core==0.9.1
+qcodes==0.56.0     # 0.57 removed qcodes.utils.helpers, which quantify-core 0.9.1 imports
+xarray==2026.2.0   # 2026.4+ breaks write_dataset in both quantify-core and qblox-scheduler
+numpy
+scipy
+matplotlib
+lmfit
+qutip
+pygsti
+scikit-rf
+typing_extensions
+
+# Notebooks and tests
+jupyter
+ipympl
+tqdm
+pytest

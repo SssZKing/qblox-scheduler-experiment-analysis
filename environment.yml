@@ -1,0 +1,15 @@
+# qbs_env: standalone qblox-scheduler environment, separate from the lab PC qblox_env
+# (quantify-scheduler 0.23.1, Python 3.9.18), which is not touched.
+#     conda env create -f environment.yml
+#     conda activate qbs_env
+# The pip step installs the exact Windows lock (requirements/qbs_env-win-py312.txt);
+# see MIGRATION_PLAN.md for why each version is pinned.
+name: qbs_env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - git   # qblox-applications is installed from GitLab, not PyPI
+  - pip:
+      - -r requirements/qbs_env-win-py312.txt

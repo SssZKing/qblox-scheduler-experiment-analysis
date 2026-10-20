@@ -1,0 +1,106 @@
+# Migration plan: qqea (quantify-scheduler) to qblox-scheduler
+
+Source: [qblox-quantify-experiment-analysis](https://github.com/SssZKing/qblox-quantify-experiment-analysis) (`qqea`, 17.5k lines).
+Target: this repo, running in a new standalone env `qbs_env`. The lab PC `qblox_env` stays as it is.
+
+Status: plan only. No code has been ported yet. Everything marked *verified* below was run on 2026-10-20 (Linux, Python 3.12, and Python 3.9 for the `qblox_env` read check).
+
+## 1. Decisions
+
+| Question | Decision | Why |
+| --- | --- | --- |
+| One env or two? | Two: `qblox_env` (old, frozen) and `qbs_env` (new) | The stacks can't share an env: `qblox_env` is Python 3.9 / numpy 1.26 / qblox-instruments 0.16, while qblox-scheduler needs Python ≥ 3.10 and qblox-instruments ≥ 1.0. |
+| Analysis library in `qbs_env` | Keep `quantify-core` 0.9.1 | *Verified* to work with qblox-scheduler 1.0.1 once qcodes and xarray are capped (section 2). The old fitting and tomography tests pass unchanged. |
+| Unified `quantify` (26.x)? | Not needed, not used | Its `quantify[qblox-scheduler]` extra pins `qblox-scheduler>=1.0.0b6,<1.0.0b7`, and 1.0.0b6 is not available on PyPI, so the extra can't be installed. Without the extra it does import next to qblox-scheduler 1.0.1, but it brings its own copy of the scheduler API plus the Orange QS "juice" stack (bokeh, panel, influxdb), and it needs Python ≥ 3.11 and qcodes 0.56.x. It adds nothing we need. |
+| Long term | Move from `quantify_core.analysis` to `qblox_applications.qblox_scheduler.analysis` | qblox-applications ships the same analysis classes, adapted for qblox-scheduler datasets: `RabiAnalysis`, `T1Analysis`, `RamseyAnalysis`, `EchoAnalysis`, `ResonatorSpectroscopyAnalysis`, `QubitSpectroscopyAnalysis`, `SSROAnalysis`, `AllXYAnalysis`, `CosineAnalysis`, `RBAnalysis`, and others. Moving to them removes the qcodes/xarray caps. |
+
+## 2. Package versions
+
+`qbs_env` pins come from `requirements/qbs_env.in`. The full Windows lock (`requirements/qbs_env-win-py312.txt`) is what `environment.yml` installs.
+
+| Package | `qblox_env` (current, lab PC) | `qbs_env` (new) | Notes |
+| --- | --- | --- | --- |
+| Python | 3.9.18 | **3.12** | qblox-scheduler ≥ 3.10, xarray 2026.x ≥ 3.11, qutip 5.3 ≥ 3.11 |
+| quantify-scheduler | 0.23.1 | — | replaced by qblox-scheduler |
+| **qblox-scheduler** | — | **1.0.1** (+ `[cli]`) | released 2026-10-12; `[cli]` adds the migration tool |
+| **qblox-applications** | — | **git @ `771b6c4`** (2026-10-02) | Not on PyPI. Install from GitLab, which needs `git`. Provides `BasicTransmonElement`, `CompositeSquareEdge` and the analysis classes |
+| qblox-instruments | 0.16.0 | **1.4.1** | cluster firmware: see section 3 |
+| quantify-core | 0.9.1 | 0.9.1 | last release (2025-08); unmaintained |
+| qcodes | 0.46.0 | **0.56.0 (cap)** | 0.57 removed `qcodes.utils.helpers`, which quantify-core imports (*verified*: 0.52–0.56 OK, 0.57+ fail). qblox-instruments 1.4.1 needs ≥ 0.52 |
+| xarray | 2024.2.0 | **2026.2.0 (cap)** | 2026.4+ raises `TypeError` in `write_dataset`, in quantify-core **and in qblox-scheduler 1.0.1's own `AdapterH5NetCDF`** (*verified*), so the cap is needed even without quantify-core |
+| numpy | 1.26.4 | 2.5.4 | numpy 2: check our own code for removed aliases (`np.float_`, `np.complex_`, …) |
+| scipy | 1.12.0 | 1.18.1 | |
+| pandas | 2.2.1 | 3.0.6 | |
+| matplotlib | 3.8.3 | 3.11.2 | |
+| lmfit | 1.2.2 | 1.3.4 | uncertainties 3.2.2 (quantify-core needs < 3.2.3) |
+| pydantic | 2.6.3 | 2.13.5 | qblox-scheduler needs 2.12–2.13.5 |
+| qutip | 5.0.2 | 5.3.1 | |
+| pygsti | 0.9.14.3 | 0.10.2 | |
+| scikit-rf | 0.32.0 | 2.2.0 | |
+| h5netcdf / h5py / netcdf4 | 1.3.0 / 3.10.0 / 1.7.2 | 1.8.1 / 3.16.0 / 1.7.1.post2 | |
+| PyQt5 / pyqt5-qt5 | 5.15.10 / 5.15.2 | 5.15.11 / 5.15.2 | quantify-core needs PyQt5; qblox-scheduler caps pyqt5-qt5 ≤ 5.15.2 on Windows |
+| jupyterlab | 4.4.1 | 4.6.4 | |
+
+Not carried over from `qblox_env` (unused by qqea): zhinst*, scqubits, spirack (still pulled in by qblox-instruments), broadbean (still pulled in by qcodes), stim (still pulled in by pygsti).
+
+### What was verified in this env
+
+- `uv pip compile` resolves for Windows and Linux on Python 3.12 (the two locks differ only in the Linux-only `pexpect`/`ptyprocess`, Windows-only `pywinpty`, and `pyqt5-qt5`).
+- Old repo `tests/test_fitting.py`, `tests/test_iswap_exchange.py`, `tests/tomography/`: **58 passed, 1 skipped** against numpy 2.5.4, pandas 3.0.6, pygsti 0.10.2, qutip 5.3.1, lmfit 1.3.4.
+- `quantify_core` `RabiAnalysis`, `CosineAnalysis`, `T1Analysis` run end to end, and `write_dataset`/`load_dataset` work.
+- `HardwareAgent(..., create_dummy_connections=True).run(schedule)` with a `Schedule.loop` sweep works on a dummy cluster. It saves `datadir/YYYYMMDD/<TUID>/dataset.hdf5` + `snapshot.json`, the same layout as quantify-core. `quantify_core.data.handling.load_dataset(tuid)` reads it.
+- A complex-valued dataset written by qblox-scheduler in `qbs_env` loads with `quantify_core.load_dataset` in **Python 3.9 with `qblox_env`'s pins**, and the values match. Old notebooks in `qblox_env` can analyse new data.
+
+## 3. Hardware constraint: cluster firmware
+
+| | qblox-instruments | Cluster firmware |
+| --- | --- | --- |
+| `qblox_env` | 0.16.0 | **0.11.0 exactly** |
+| `qbs_env` | 1.4.1 (qblox-scheduler 1.x) | **≥ 0.17.0, < 2.0.0** |
+
+One cluster can't run both. After the firmware upgrade, `qblox_env` can no longer drive the hardware. It stays useful for old notebooks, dry runs and analysis of any data (old or new, see above). Consequences:
+
+1. Before the upgrade, record reference data in `qblox_env`: resonator spectroscopy, Rabi, T1/T2/Ramsey, readout fidelity, single-qubit RB, iSWAP chevron and RB. Also save the full device snapshot. These are the baselines for checking `qbs_env` on hardware.
+2. The upgrade is the cutover point: do it only after phases 1–5 pass dry runs.
+3. Optional fallback if a hardware-capable old stack is needed after the upgrade: a third "bridge" env with quantify-scheduler 0.28.1 + qblox-instruments 1.4.1 + quantify-core 0.9.1 on Python 3.10/3.11. It resolves (*verified*, qcodes 0.52.0) but is untested on hardware, and it is a second migration of qqea (0.23 to 0.28), so only build it if needed.
+
+## 4. What changes in the code (quantify-scheduler 0.23 to qblox-scheduler 1.0)
+
+The official tool, `qblox-scheduler migrate-scripts <path>`, was run on a scratch copy of `qqea/src`. It rewrote 16 of 50 files (+128/−160 lines): imports, renamed kwargs, acquisition classes, DRAG beta. Afterwards 8 modules still failed to import. What's left is manual:
+
+| Change | Where in qqea | Size | Handling |
+| --- | --- | --- | --- |
+| `ScheduleGettable` and `MeasurementControl` removed. Sweeps become `Schedule.loop(linspace(...))` run by `HardwareAgent.run(schedule)`, which returns and saves the dataset | `experiments/nodes/_base.py`, `nodes/*`, `calibration_nodes.py`, `runners.py`, `dry_run.py`, `saving.py`, `simulated_data.py`, `schedules/iswap.py` (10 files, ~50 sites) | **largest** | Rewrite the node base class around `HardwareAgent`. `InstrumentCoordinator`/`ClusterComponent`/`Cluster` setup moves into the agent (hardware config + device config). Dry runs use `create_dummy_connections=True`. `saving.py` mostly goes away (the agent saves) |
+| Device elements are pydantic models, not qcodes instruments: `q.clock_freqs.f01(5e9)` becomes `q.clock_freqs.f01 = 5e9` | ~70 calls in `schedules/single_qubit.py`, `nodes/readout.py`, `nodes/single_qubit.py`, `runners.py`, `gst.py`, `tomography.py`, `fitting/readout.py` | medium | The tool only rewrites module-level instances. Calls on function arguments (most of ours) are manual |
+| `BasicTransmonElement` moved to `qblox_applications.qblox_scheduler.superconducting.transmon` and must be imported before a device config is loaded (that import registers the element type) | 5 files | small | one import module in the new package |
+| Custom per-qubit TWPA flag via `element.add_parameter(...)` (impossible on pydantic models) | `schedules/twpa.py` | small | subclass `BasicTransmonElement` with a `twpa_pump: bool` field, or keep a `{qubit: bool}` map |
+| `CompositeiSWAPEdge` (qcodes `InstrumentChannel` + `ManualParameter`s) | `schedules/edges.py` | small–medium | Rewrite as a pydantic `Edge` with an `iSWAP(SchedulerSubmodule)` block, copying `CompositeSquareEdge`/`CZ` in qblox-applications |
+| Old `Schedule` is now `qblox_scheduler.schedules.schedule.TimeableSchedule`. The new top-level `qblox_scheduler.Schedule` supports loops. The tool's `...schedule import Schedule` rewrite fails to import | ~9 imports | small | use `qblox_scheduler.Schedule` for new loop-based builders and `TimeableSchedule` where explicit timing is needed |
+| `bin_mode` removed (dropped silently by the tool). Single-shot data uses `average_segment_repetitions=False` | 35 sites | medium | check every single-shot readout path (g/e discrimination, readout optimisation, tomography, GST) |
+| **DRAG: `D_amp` became `beta`, and the derivative scales as `beta/sigma²` instead of `D_amp/sigma`**, so `beta = D_amp·sigma` | 29 sites + **stored calibration values** | small code, **high risk** | The tool rewrites call sites but not saved `rxy.beta`/DRAG values in device JSON or notebooks. Recalibrate DRAG or convert saved values explicitly |
+| `amp` → `amplitude`, `G_amp` → `amplitude`, `acq_channel` → `acq_label`, `SSBIntegrationComplex` → `IQIntegration`, `ThresholdedAcquisition` → `ThresholdedIQIntegration`, `t0` removed (use `rel_time`) | throughout `schedules/` | done by tool | review the diff |
+| `qcodes.instrument.parameter` → `qcodes.parameters`, `qcodes.instrument.base` deprecated | `edges.py`, `hp83732b.py` | small | HP83732B driver otherwise fine with qcodes 0.56 |
+| Device/hardware JSON configs | lab configs | small | `qblox-scheduler migrate-configs <dir>` |
+| New dataset layout: dims `acq_index_<n>`, variables named by `acq_label` (`"0"`, …), sweep values as named coords, instead of quantify's `x0…/y0…` | every `quantify_core.analysis` call and every fit that reads `ds.x0`/`ds.y0` | medium | Phase 5 adapter (below) |
+
+Unchanged: `fitting/` and `tomography/` have no quantify-scheduler imports and pass their tests in `qbs_env`. `schedules/clifford/` (PycQED) is pure Python.
+
+## 5. Phases
+
+Each phase ends with tests green in `qbs_env`. Phases 1–5 need no hardware.
+
+0. **Environment.** `conda env create -f environment.yml` on the lab PC. Run `pip check`, then an import smoke test of `qblox_scheduler`, `qblox_applications`, `quantify_core.analysis`, `pygsti`, `qutip`. Commit the frozen `conda env export` next to the lock.
+1. **Scaffold and analysis port.** Package `qsea` (qblox-scheduler-experiment-analysis; name open, see section 6) in this repo, same layout as `qqea`. Copy `fitting/` and `tomography/` with their tests unchanged. Add CI-style `pytest` (fast tests only).
+2. **Schedules.** Copy `schedules/`, run `migrate-scripts`, then fix by hand: `Schedule`/`TimeableSchedule`, `bin_mode` → `average_segment_repetitions`, DRAG beta, TWPA flag, `CompositeiSWAPEdge`. Convert parameter sweeps that `ScheduleGettable` used to drive into `Schedule.loop`. **Check that compiled output matches the old code**: extend `tools/compare_schedules.py` to export compiled waveforms and timing (npz/json) from each env and compare them across envs. Run it on every builder, with small tolerances for the DRAG change.
+3. **Device and configs.** pydantic `QuantumDevice` with qblox-applications `BasicTransmonElement` + new `CompositeiSWAPEdge`. Migrate the lab hardware config and device JSON (`migrate-configs`) and convert DRAG beta values. Write a loader that registers element/edge types before `QuantumDevice.from_dict`.
+4. **Execution layer.** Rewrite `experiments/nodes/_base.py` around `HardwareAgent(hw_config, device).run(schedule)`. Port the calibration nodes topic by topic (single_qubit, readout, iswap_stark, roadmap) and the `runners.py` DRAG/readout optimisation. Point `QBLOX_DATADIR` at both `OutputDirectoryManager.set_datadir` and `quantify_core.data.handling.set_datadir` so old analyses find new TUIDs. Dry-run every node with `create_dummy_connections=True` (rewrite `dry_run.py` and its tests).
+5. **Analysis bridge.** A small adapter: qblox-scheduler dataset (acq_index dims, acq_label vars, named coords) to quantify dataset v2 (`x0…`, `y0…` with `units`/`long_name`, `tuid`). Existing quantify-core analyses and `fitting/` keep working through it. Test it against `simulated_data.py`. Then try moving one node at a time to `qblox_applications.qblox_scheduler.analysis` (same class names); once all are moved, drop quantify-core and the qcodes/xarray caps.
+6. **Hardware cutover.** Record baselines in `qblox_env` (section 3), upgrade the cluster firmware to ≥ 0.17 (match qblox-instruments 1.4.1), then repeat the baselines in `qbs_env` and compare. Keep `qblox_env` for legacy notebooks and analysis.
+
+## 6. Open questions
+
+- **New package name**: `qsea` proposed, to mirror `qqea`.
+- **Sweep style**: port each node as a hardware loop (`Schedule.loop`, faster, the native way) or keep software sweeps by running one `HardwareAgent.run` per point? Proposed: hardware loops wherever the swept quantity is a schedule parameter. Software loops only for external instruments (HP83732B TWPA pump power/frequency, LO sweeps).
+- **qblox-applications**: not on PyPI, no tags yet. It is pinned to a commit; switch to a PyPI release once one exists.
+- **Firmware upgrade timing**: who does it, and when the reference data from `qblox_env` gets taken.
+- **Python 3.12 on the lab PC**: confirm conda can install it there (any Python ≥ 3.11 works with these pins).
