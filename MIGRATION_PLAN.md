@@ -108,6 +108,8 @@ Decided:
 - Package name `qsea`.
 - Keep `quantify-core` 0.9.1 for analysis for now (long-term library deferred).
 - Sweeps: hardware loops (`Schedule.loop`) wherever the swept quantity is a schedule parameter; `SetParameter`/`Callback` software loops only for external instruments (HP83732B, LOs).
+- Clifford lookups keep the stored hash tables and hash `ptm.astype(np.int32)` explicitly (no int64 tables, no table-free lookup).
+- No qua-libs attribution notice is needed.
 
 Pending input:
 - (received 2026-10-21) Lab snapshot and hardware config: converted into `configs/`.
