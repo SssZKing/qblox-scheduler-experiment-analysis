@@ -1,10 +1,15 @@
-"""Running experiments: data saving for now; calibration nodes, runners and the
-HardwareAgent run helpers follow in later migration phases (see MIGRATION_PLAN.md).
+"""Running experiments: calibration nodes, hardware runners, instrument drivers,
+data saving, and simulated data for dry runs.
 
-Names are imported lazily, as in qqea, so importing one module does not pull in the rest.
+Names are imported lazily, so ``import qsea.experiments.hp83732b`` (which
+``qsea.schedules.single_qubit`` does) does not pull in the calibration nodes,
+which themselves import ``qsea.schedules``.
 """
 
 _EXPORTS = {
+    "CalibrationNodes": "qsea.experiments.calibration_nodes",
+    "HP83732B": "qsea.experiments.hp83732b",
+    "set_datadir_from_env": "qsea.experiments.datadir",
     "save_retrieve_acquisition_dataset": "qsea.experiments.saving",
 }
 
