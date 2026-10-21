@@ -267,3 +267,25 @@ def test_a_fit_that_raises_on_bad_data_is_a_failed_node(monkeypatch):
     assert nodes.drag_calibration(qubit) == (False, None)
     assert qubit.rxy.beta == BETA
     assert nodes.history[-1]["ok"] is False and "error" not in nodes.history[-1]
+
+
+class PartialRBAnalysis:
+    """What quantify-core leaves when a step of ``RBAnalysis.run()`` raises: it only warns,
+    so the attributes of the failed step are never set."""
+
+    def __init__(self, **kwargs):
+        pass
+
+    def run(self):
+        self.alpha = 0.98
+        self.r = 0.01
+        return self
+
+
+def test_rb_with_a_partial_analysis_is_a_failed_node(monkeypatch, fake_gettable):
+    monkeypatch.setattr(single_qubit, "RBAnalysis", PartialRBAnalysis)
+    nodes = make_nodes()
+
+    assert nodes.randomized_benchmarking(
+        FakeQubit(), length_setpoints=np.arange(0, 41, 10), seed_setpoints=np.array([1, 2]),
+    ) == (False, None)

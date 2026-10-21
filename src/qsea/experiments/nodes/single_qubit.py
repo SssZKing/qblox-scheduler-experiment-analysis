@@ -774,20 +774,23 @@ class SingleQubitNodes(NodeBase):
         if plot:
             rb_result.display_figs_mpl()
 
-        alpha = rb_result.alpha
-        r = rb_result.r
+        # quantify-core's analysis.run() only warns when a step raises, so a fit that fails
+        # (e.g. NaN seed-to-seed variances) leaves these attributes unset: count it as failed
+        alpha = getattr(rb_result, "alpha", np.nan)
+        r = getattr(rb_result, "r", np.nan)
+        sample_size_variance = getattr(rb_result, "sample_size_variance", np.nan)
         alpha_ok = np.isfinite(alpha) and 0 < alpha < 1
-        variance_ok = rb_result.sample_size_variance > variance_threshold
+        variance_ok = np.isfinite(sample_size_variance) and sample_size_variance > variance_threshold
 
         if not (alpha_ok and variance_ok):
             print(f'RB failed (alpha={alpha}, sample_size_variance='
-                  f'{rb_result.sample_size_variance:.2f}). Not trusted.')
+                  f'{sample_size_variance:.2f}). Not trusted.')
             return False, None
 
         r_gate = r / PHYSICAL_GATES_PER_CLIFFORD
         gate_fidelity = 1 - r_gate
         print(f'RB Characterized: alpha={alpha:.4f}, r_g={r_gate:.3e}, '
               f'F_g={gate_fidelity * 100:.3f}%, '
-              f'sample_size_variance={rb_result.sample_size_variance:.2f}')
+              f'sample_size_variance={sample_size_variance:.2f}')
 
         return True, r_gate
