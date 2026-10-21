@@ -772,7 +772,7 @@ widgetsnbextension==4.0.16
     # via ipywidgets
 wirerope==1.0.0
     # via methodtools
-xarray==2026.2.0
+xarray==2025.8.0
     # via
     #   -r requirements/qbs_env.in
     #   cf-xarray

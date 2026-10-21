@@ -12,7 +12,7 @@ qblox-applications @ git+https://gitlab.com/qblox/packages/software/qblox-applic
 # Analysis side
 quantify-core==0.9.1
 qcodes==0.56.0     # 0.57 removed qcodes.utils.helpers, which quantify-core 0.9.1 imports
-xarray==2026.2.0   # 2026.4+ breaks write_dataset in both quantify-core and qblox-scheduler
+xarray==2025.8.0   # 2025.9+ makes Dataset.update return None (breaks quantify-core to_gridded_dataset); 2026.4+ also breaks write_dataset
 numpy
 scipy
 matplotlib
