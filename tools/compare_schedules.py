@@ -25,10 +25,18 @@ What is expected to differ, and is normalised before comparing:
 No instruments are touched: pump generators and the instrument coordinator are fakes,
 and compilation stops before the hardware backend.
 
+- The reference's ``D_amp`` is compared as ``beta = D_amp * duration / 8`` (see
+  ``qsea.device.drag_beta_from_motzoi``); compared values are rounded to 10 digits.
+
 Run it from the repo root in ``qbs_env``::
 
     python tools/compare_schedules.py
     python tools/compare_schedules.py --only rabi,t1 --verbose
+
+``--device configs/quantum_device.json --reference tests/schedules/reference/qqea-4de2850-lab.json``
+compares the lab device (converted with ``qsea.device``) against qqea built with the
+snapshot it came from. A case that fails on both sides (e.g. a clock left at NaN) counts
+as the same.
 """
 
 from __future__ import annotations
@@ -95,7 +103,13 @@ EDGE_PARAMS = {
 }
 
 
-def build_device():
+def build_device(device_path=None):
+    if device_path:
+        from qsea.device import load_quantum_device
+
+        qd = load_quantum_device(device_path)
+        return qd, qd.get_element("qubit1"), qd.get_element("qubit2")
+
     from qblox_applications.qblox_scheduler.superconducting.transmon import BasicTransmonElement
     from qblox_scheduler import QuantumDevice
 
@@ -378,7 +392,7 @@ def _rows(schedule):
     return rows
 
 
-def dump(only):
+def dump(only, device_path=None):
     from qblox_scheduler.backends import SerialCompiler
     from qblox_scheduler.schedules.schedule import TimeableScheduleBase
 
@@ -389,7 +403,7 @@ def dump(only):
         if name in PENDING:
             results[name] = {"status": "pending", "reason": PENDING[name]}
             continue
-        qd, q1, q2 = build_device()
+        qd, q1, q2 = build_device(device_path)
         log = []
         mod = importlib.import_module(f"qsea.schedules.{module}")
         env = {
@@ -459,6 +473,10 @@ def _parse_op(op):
     return OP_RENAMES.get(name, name), args
 
 
+def _round(value):
+    return float(f"{value:.10g}") if isinstance(value, float) else value
+
+
 def _norm_rows(rows, new_side):
     out = []
     if new_side:
@@ -473,11 +491,13 @@ def _norm_rows(rows, new_side):
         rows = body
     for t, dur, port, clock, is_acq, op in rows:
         name, args = _parse_op(op)
+        if name == "DRAGPulse" and not new_side and "beta" in args:
+            args["beta"] = args["beta"] * dur * 1e-12 / 8  # D_amp -> beta
         if name in ("IdlePulse", "Reset") and clock == "cl0.baseband":
             if dur == 0.0:
                 continue
             name = "Idle"
-        full = {k: args.get(k, d) for k, d in COMPARED_ARGS.items()}
+        full = {k: _round(args.get(k, d)) for k, d in COMPARED_ARGS.items()}
         out.append(json.dumps([t, dur, port, clock, is_acq, name, full], sort_keys=True))
     return sorted(out)
 
@@ -497,6 +517,14 @@ def compare(ref, new, verbose=False, limit=6):
         if n["status"] == "pending":
             report.append(f"pending    {name}: {n['reason']}")
             counts["pending"] += 1
+            continue
+        if b["status"] == "error":
+            if n["status"] == "error":
+                report.append(f"same       {name} (fails on both sides: {n['error'][:90]})")
+                counts["same"] += 1
+            else:
+                report.append(f"DIFFERENT  {name}: reference failed ({b['error'][:90]}), qsea did not")
+                counts["different"] += 1
             continue
         if n["status"] == "error":
             report.append(f"ERROR      {name}: {n['error']}")
@@ -536,12 +564,14 @@ def main():
     parser.add_argument("--only", default="", help="comma-separated substrings of case names")
     parser.add_argument("--verbose", action="store_true", help="show tracebacks of failing cases")
     parser.add_argument("--report", help="also write the report to this file")
+    parser.add_argument("--device", help="QuantumDevice JSON to build with instead of the mock device")
+    parser.add_argument("--reference", default=REFERENCE, help="reference dump (default %(default)s)")
     args = parser.parse_args()
     only = [o for o in args.only.split(",") if o]
 
-    with open(REFERENCE) as f:
+    with open(args.reference) as f:
         ref = json.load(f)
-    report, counts = compare(ref, dump(only), verbose=args.verbose)
+    report, counts = compare(ref, dump(only, args.device), verbose=args.verbose)
     print(report)
     if args.report:
         with open(args.report, "w") as f:

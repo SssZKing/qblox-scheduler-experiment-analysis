@@ -1,0 +1,166 @@
+{
+  "config_type": "QbloxHardwareCompilationConfig",
+  "hardware_description": {
+    "cluster0": {
+      "instrument_type": "Cluster",
+      "ref": "external",
+      "modules": {
+        "2": {
+          "instrument_type": "QCM_RF"
+        },
+        "4": {
+          "instrument_type": "QCM_RF"
+        },
+        "7": {
+          "instrument_type": "QRM_RF"
+        }
+      }
+    }
+  },
+  "hardware_options": {
+    "modulation_frequencies": {
+      "qubit1:res-qubit1.ro": {
+        "lo_freq": 7100000000.0
+      },
+      "qubit1:mw-qubit1.01": {
+        "lo_freq": 4430000000.0
+      },
+      "qubit1:fs-qubit1.12": {
+        "lo_freq": 4430000000.0
+      },
+      "qubit1:mw-qubit1.stark": {
+        "lo_freq": 4430000000.0
+      },
+      "qubit2:res-qubit2.ro": {
+        "lo_freq": 7100000000.0
+      },
+      "qubit2:mw-qubit2.01": {
+        "lo_freq": 4688660794.0
+      },
+      "qubit2:fs-qubit2.12": {
+        "lo_freq": 4688660794.0
+      },
+      "qubit2:mw-qubit2.stark": {
+        "lo_freq": 4690000000.0
+      },
+      "snail:res-snail.ro": {
+        "lo_freq": 9620000000.0
+      },
+      "snail:mw-snail.01": {
+        "lo_freq": 7400000000.0
+      }
+    },
+    "mixer_corrections": {
+      "qubit1:res-qubit1.ro": {
+        "auto_lo_cal": "on_lo_interm_freq_change",
+        "auto_sideband_cal": "on_interm_freq_change"
+      },
+      "qubit1:mw-qubit1.01": {
+        "auto_lo_cal": "on_lo_interm_freq_change",
+        "auto_sideband_cal": "on_interm_freq_change"
+      },
+      "qubit1:fs-qubit1.12": {
+        "auto_lo_cal": "on_lo_interm_freq_change",
+        "auto_sideband_cal": "on_interm_freq_change"
+      },
+      "qubit1:mw-qubit1.stark": {
+        "auto_lo_cal": "on_lo_interm_freq_change",
+        "auto_sideband_cal": "on_interm_freq_change"
+      },
+      "qubit2:res-qubit2.ro": {
+        "auto_lo_cal": "on_lo_interm_freq_change",
+        "auto_sideband_cal": "on_interm_freq_change"
+      },
+      "qubit2:mw-qubit2.01": {
+        "auto_lo_cal": "on_lo_interm_freq_change",
+        "auto_sideband_cal": "on_interm_freq_change"
+      },
+      "qubit2:fs-qubit2.12": {
+        "auto_lo_cal": "on_lo_interm_freq_change",
+        "auto_sideband_cal": "on_interm_freq_change"
+      },
+      "qubit2:mw-qubit2.stark": {
+        "auto_lo_cal": "on_lo_interm_freq_change",
+        "auto_sideband_cal": "on_interm_freq_change"
+      },
+      "snail:res-snail.ro": {
+        "auto_lo_cal": "on_lo_interm_freq_change",
+        "auto_sideband_cal": "on_interm_freq_change"
+      },
+      "snail:mw-snail.01": {
+        "auto_lo_cal": "on_lo_interm_freq_change",
+        "auto_sideband_cal": "on_interm_freq_change"
+      }
+    }
+  },
+  "connectivity": {
+    "graph": [
+      [
+        "cluster0.module2.complex_output_0",
+        [
+          "qubit1:mw"
+        ]
+      ],
+      [
+        "cluster0.module2.complex_output_0",
+        [
+          "qubit1:fs"
+        ]
+      ],
+      [
+        "cluster0.module7.complex_output_0",
+        [
+          "qubit1:res"
+        ]
+      ],
+      [
+        "cluster0.module7.digital_output_0",
+        [
+          "qubit1:switch"
+        ]
+      ],
+      [
+        "cluster0.module4.complex_output_0",
+        [
+          "qubit2:mw"
+        ]
+      ],
+      [
+        "cluster0.module4.complex_output_0",
+        [
+          "qubit2:fs"
+        ]
+      ],
+      [
+        "cluster0.module7.complex_output_0",
+        [
+          "qubit2:res"
+        ]
+      ],
+      [
+        "cluster0.module7.digital_output_0",
+        [
+          "qubit2:switch"
+        ]
+      ],
+      [
+        "cluster0.module4.complex_output_1",
+        [
+          "snail:mw"
+        ]
+      ],
+      [
+        "cluster0.module7.complex_output_0",
+        [
+          "snail:res"
+        ]
+      ],
+      [
+        "cluster0.module4.digital_output_1",
+        [
+          "snail:switch"
+        ]
+      ]
+    ]
+  }
+}

@@ -5,3 +5,7 @@ build/
 dist/
 .ipynb_checkpoints/
 *.bak*
+
+# Q1ASM assembler scratch files from compiling to cluster instructions
+tmp.hex
+tmp.q1asm

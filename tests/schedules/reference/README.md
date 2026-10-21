@@ -25,3 +25,18 @@ How it was made:
 python tools/compare_schedules.py dump --src <qqea-4de2850 with the int32 hash>/src \
     --out qqea-4de2850.json
 ```
+
+## With the lab device
+
+- `qqea-4de2850-lab.json`: the same dump with the device parameters of the lab snapshot
+  (`compare_schedules.py dump ... --snapshot <snapshot.json>`), compared against qsea built
+  from `configs/quantum_device.json`. 8 cases fail on both sides because `qubit1.12` has no
+  frequency (`f12` is NaN on the device).
+- `qqea-4de2850-lab-hardware.json`: what each cluster module and sequencer is told to do
+  (LO/NCO frequencies, attenuation, calibration, integration and thresholding settings,
+  waveform and weight samples) for every case, compiled with the snapshot's hardware config;
+  made with `tools/compare_hardware.py dump-qqea` in the same qblox_env copy. Compared
+  against qsea with `configs/` by `tools/compare_hardware.py`.
+
+The snapshot holds the instruments' network addresses and is not kept in the repo; these
+files contain none.

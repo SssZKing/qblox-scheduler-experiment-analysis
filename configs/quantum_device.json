@@ -1,0 +1,172 @@
+{
+  "name": "quantum_device",
+  "elements": {
+    "qubit1": {
+      "name": "qubit1",
+      "element_type": "BasicTransmonElement",
+      "reset": {
+        "name": "reset",
+        "duration": 0.00025
+      },
+      "rxy": {
+        "name": "rxy",
+        "amp180": 0.6987522292899002,
+        "beta": -7.129886974147219e-10,
+        "duration": 1.0000000000000001e-07
+      },
+      "measure": {
+        "name": "measure",
+        "pulse_type": "SquarePulse",
+        "pulse_amp": 0.215,
+        "pulse_duration": 4.4e-06,
+        "acq_label": 0,
+        "acq_delay": 2.16e-07,
+        "integration_time": 4.4e-06,
+        "reset_clock_phase": true,
+        "acq_weights_a": null,
+        "acq_weights_b": null,
+        "acq_weight_type": "SSB",
+        "acq_rotation": 77.85898047402878,
+        "acq_threshold": 0.006830156206661423,
+        "num_points": 1
+      },
+      "pulse_compensation": {
+        "name": "pulse_compensation",
+        "max_compensation_amp": NaN,
+        "time_grid": NaN,
+        "sampling_rate": NaN,
+        "min_duration": NaN
+      },
+      "ports": {
+        "name": "ports",
+        "microwave": "qubit1:mw",
+        "flux": "qubit1:fl",
+        "readout": "qubit1:res"
+      },
+      "clock_freqs": {
+        "name": "clock_freqs",
+        "f01": 4507764302.69258,
+        "f12": NaN,
+        "readout": 7145297168.575804
+      }
+    },
+    "qubit2": {
+      "name": "qubit2",
+      "element_type": "BasicTransmonElement",
+      "reset": {
+        "name": "reset",
+        "duration": 0.00025
+      },
+      "rxy": {
+        "name": "rxy",
+        "amp180": 0.6882623088968642,
+        "beta": -3.208965298136739e-10,
+        "duration": 1e-07
+      },
+      "measure": {
+        "name": "measure",
+        "pulse_type": "SquarePulse",
+        "pulse_amp": 0.19749999999999998,
+        "pulse_duration": 4.4e-06,
+        "acq_label": 1,
+        "acq_delay": 2.16e-07,
+        "integration_time": 4.4e-06,
+        "reset_clock_phase": true,
+        "acq_weights_a": null,
+        "acq_weights_b": null,
+        "acq_weight_type": "SSB",
+        "acq_rotation": 48.47008284189155,
+        "acq_threshold": -0.015217732032642801,
+        "num_points": 1
+      },
+      "pulse_compensation": {
+        "name": "pulse_compensation",
+        "max_compensation_amp": NaN,
+        "time_grid": NaN,
+        "sampling_rate": NaN,
+        "min_duration": NaN
+      },
+      "ports": {
+        "name": "ports",
+        "microwave": "qubit2:mw",
+        "flux": "qubit2:fl",
+        "readout": "qubit2:res"
+      },
+      "clock_freqs": {
+        "name": "clock_freqs",
+        "f01": 4765683311.263865,
+        "f12": NaN,
+        "readout": 7266268966.529177
+      }
+    },
+    "snail": {
+      "name": "snail",
+      "element_type": "BasicTransmonElement",
+      "reset": {
+        "name": "reset",
+        "duration": 0.0002
+      },
+      "rxy": {
+        "name": "rxy",
+        "amp180": NaN,
+        "beta": 0.0,
+        "duration": 2e-08
+      },
+      "measure": {
+        "name": "measure",
+        "pulse_type": "SquarePulse",
+        "pulse_amp": 0.25,
+        "pulse_duration": 3e-07,
+        "acq_label": 0,
+        "acq_delay": 0.0,
+        "integration_time": 1e-06,
+        "reset_clock_phase": true,
+        "acq_weights_a": null,
+        "acq_weights_b": null,
+        "acq_weight_type": "SSB",
+        "acq_rotation": 0.0,
+        "acq_threshold": 0.0,
+        "num_points": 1
+      },
+      "pulse_compensation": {
+        "name": "pulse_compensation",
+        "max_compensation_amp": NaN,
+        "time_grid": NaN,
+        "sampling_rate": NaN,
+        "min_duration": NaN
+      },
+      "ports": {
+        "name": "ports",
+        "microwave": "snail:mw",
+        "flux": "snail:fl",
+        "readout": "snail:res"
+      },
+      "clock_freqs": {
+        "name": "clock_freqs",
+        "f01": NaN,
+        "f12": NaN,
+        "readout": NaN
+      }
+    }
+  },
+  "edges": {
+    "qubit1_qubit2": {
+      "name": "qubit1_qubit2",
+      "edge_type": "CompositeiSWAPEdge",
+      "parent_element_name": "qubit1",
+      "child_element_name": "qubit2",
+      "iswap": {
+        "name": "iswap",
+        "pulse_frequency": 258660794.0,
+        "pulse_amp": 9.0,
+        "pulse_duration": 4.95e-07,
+        "ac_stark_phase_q1": -122.2027628813346,
+        "ac_stark_phase_q2": 150.92543820574707
+      }
+    }
+  },
+  "cfg_sched_repetitions": 200,
+  "keep_original_schedule": true,
+  "hardware_config": null,
+  "scheduling_strategy": "asap"
+}

@@ -18,6 +18,8 @@ src/qsea/
     tomography/     analysis: state/process tomography, GST datasets (unchanged from qqea)
     experiments/
         saving.py   save a raw acquisition dataset as a quantify experiment folder
+    device.py       load/save the QuantumDevice and hardware config; convert a qqea snapshot
+configs/            the lab QuantumDevice and hardware config (see configs/README.md)
 ```
 
 The schedule builders keep their qqea names and arguments and compile to the same schedules
@@ -32,8 +34,18 @@ The schedule builders keep their qqea names and arguments and compile to the sam
 - `set_twpa_pump(qubit, False)` works as before; the setting is kept in `qsea.schedules.twpa`
   (`twpa_pump_settings()`), not on the element.
 
-Still to come (MIGRATION_PLAN.md, phases 3 and 4): the lab device and hardware configs, and the
-calibration nodes and runners on `HardwareAgent`.
+The lab device is in `configs/`:
+
+```python
+from qsea.device import load_quantum_device, load_hardware_config
+device = load_quantum_device("configs/quantum_device.json")
+hardware_cfg = load_hardware_config("configs/hardware_config.json")
+```
+
+With it, qsea compiles to the same cluster instructions as qqea did with the original snapshot
+(`tools/compare_hardware.py`, run by the tests).
+
+Still to come (MIGRATION_PLAN.md, phase 4): the calibration nodes and runners on `HardwareAgent`.
 
 Analysis still uses `quantify-core` 0.9.1 (`quantify_core.analysis`, `quantify_core.data.handling`).
 
@@ -56,10 +68,12 @@ In `qbs_env`:
 python -m pytest tests
 ```
 
-Check the ported schedules against qqea's (also part of the tests):
+Check the ported schedules and cluster instructions against qqea's (also part of the tests):
 
 ```
 python tools/compare_schedules.py
+python tools/compare_schedules.py --device configs/quantum_device.json --reference tests/schedules/reference/qqea-4de2850-lab.json
+python tools/compare_hardware.py
 ```
 
 ## License
