@@ -8,7 +8,8 @@ decides whether the pump is gated on. Each runner is split into a ``*_schedule``
 which only builds the schedule, and the run function.
 ``CalibrationNodes`` saves what these return with
 :func:`qsea.experiments.saving.save_retrieve_acquisition_dataset`; calling a
-runner directly saves nothing, as before.
+runner directly saves nothing, as before. For an ad hoc schedule, :func:`run_and_save` runs and
+saves in one go.
 
 Changes from qqea: the run functions take the ``HardwareAgent`` instead of
 ``instrument_coordinator`` and ``quantum_device``; the DRAG runner sweeps ``rxy.beta``
@@ -33,6 +34,7 @@ __all__ = [
     "drag_calibration_schedule",
     "legacy_acquisition_layout",
     "run_schedule",
+    "run_and_save",
     "readout_freq_optimization",
     "readout_amp_optimization",
     "readout_len_optimization",
@@ -82,6 +84,27 @@ def run_schedule(schedule, agent, timeout=60):
     """Run ``schedule`` on ``agent`` and return the acquisitions in the old layout."""
     raw = agent.run(schedule, timeout=timeout, save_to_experiment=False, save_snapshot=False)
     return legacy_acquisition_layout(raw)
+
+
+def run_and_save(agent, schedule, name=None, timeout=60) -> xr.Dataset:
+    """Run ``schedule`` on ``agent`` and save the dataset like ``MeasurementControl`` would.
+
+    ``HardwareAgent.run`` would save to ``<date>/<TUID>/`` with no name and a snapshot without
+    the device or instrument settings. This saves to ``<date>/<TUID>-<name>/`` (``name``
+    defaults to the schedule's) with the full qcodes snapshot: the clusters, external
+    instruments and the device (the :class:`qsea.experiments.agent.DeviceSnapshot` and
+    ``ElementSnapshot`` instruments of :func:`~qsea.experiments.agent.make_agent`), so
+    quantify-core's ``load_dataset``, ``load_snapshot`` and ``get_latest_tuid(contains=name)``
+    find it. Returns the dataset as ``HardwareAgent.run`` returned it, with ``tuid`` and
+    ``name`` added to its attributes.
+    """
+    from qsea.experiments.saving import save_retrieve_acquisition_dataset
+
+    name = name or schedule.name
+    dataset = agent.run(schedule, timeout=timeout, save_to_experiment=False, save_snapshot=False)
+    dataset.attrs["tuid"] = save_retrieve_acquisition_dataset(dataset, name)
+    dataset.attrs["name"] = name
+    return dataset
 
 
 def _add_ge_pair(schedule, qubit_name, acq_index, readout_duration, **measure_kwargs):

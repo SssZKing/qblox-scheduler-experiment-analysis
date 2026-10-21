@@ -9,6 +9,7 @@ which themselves import ``qsea.schedules``.
 _EXPORTS = {
     "make_agent": "qsea.experiments.agent",
     "ScheduleGettable": "qsea.experiments.gettable",
+    "run_and_save": "qsea.experiments.runners",
     "set_datadir": "qsea.experiments.datadir",
     "CalibrationNodes": "qsea.experiments.calibration_nodes",
     "HP83732B": "qsea.experiments.hp83732b",

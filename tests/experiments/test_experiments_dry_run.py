@@ -55,3 +55,24 @@ def test_drag_runs_on_the_dummy_cluster_and_saves_raw_data(setup):
     tuids = nodes.history[-1]["tuids"]
     assert len(tuids) == 1
     assert list(datadir.glob(f"*/{tuids[0]}*/snapshot.json"))
+
+
+def test_run_and_save_names_the_folder_and_snapshots_the_device(setup):
+    from quantify_core.data.handling import get_latest_tuid, load_dataset
+
+    from qsea.experiments import run_and_save
+    from qsea.experiments.runners import readout_weight_optimization_schedule
+
+    nodes, qubit, _ = setup
+    schedule = readout_weight_optimization_schedule(qubit, excited=False, repetitions=10)
+    dataset = run_and_save(nodes.agent, schedule, "weights g")
+
+    tuid = dataset.attrs["tuid"]
+    assert get_latest_tuid(contains="weights g") == tuid
+    assert load_dataset(tuid).attrs["name"] == "weights g"
+    snapshot = load_snapshot(tuid)["instruments"]
+    assert snapshot["qubit1"]["submodules"]["measure"]["parameters"]["pulse_duration"]["value"] \
+        == qubit.measure.pulse_duration
+    clusters = [k for k, v in nodes.agent.hardware_config_dict["hardware_description"].items()
+                if v["instrument_type"] == "Cluster"]
+    assert clusters and all(c in snapshot for c in clusters)
