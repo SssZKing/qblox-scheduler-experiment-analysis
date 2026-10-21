@@ -400,9 +400,9 @@ def readout_weight_extractor(g_trace, e_trace, qubit, lo_freq, division_length=1
     g_trace = np.asarray(g_trace[0]).reshape(-1)
     e_trace = np.asarray(e_trace[0]).reshape(-1)
 
-    pulse_duration = qubit.measure.pulse_duration()
+    pulse_duration = qubit.measure.pulse_duration
     time_trace = np.arange(0, pulse_duration - 0.5e-9, 1e-9)
-    nco_freq = qubit.clock_freqs.readout() - lo_freq
+    nco_freq = qubit.clock_freqs.readout - lo_freq
 
     n_samples = min(g_trace.size, e_trace.size, time_trace.size)
     time_trace = time_trace[:n_samples]

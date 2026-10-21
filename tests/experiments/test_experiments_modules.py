@@ -1,6 +1,6 @@
 """simulated_data, runners re-exports and the data directory helper.
 
-Run in the qblox_dev env (never qblox_env):  python -m pytest tests/experiments
+Run in qbs_env:  python -m pytest tests/experiments
 """
 
 import numpy as np
@@ -84,6 +84,9 @@ def test_set_datadir_from_env(monkeypatch, tmp_path):
     monkeypatch.setenv("QBLOX_DATADIR", str(tmp_path))
     assert datadir.set_datadir_from_env() == tmp_path
     assert chosen == [str(tmp_path)]
+    from qblox_scheduler import OutputDirectoryManager
+
+    assert OutputDirectoryManager.get_datadir() == tmp_path  # qblox-scheduler uses it too
 
     monkeypatch.delenv("QBLOX_DATADIR")
     with pytest.raises(RuntimeError, match="QBLOX_DATADIR"):

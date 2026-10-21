@@ -13,9 +13,9 @@ from datetime import datetime
 
 import numpy as np
 
-from qcodes import ManualParameter
-from quantify_scheduler.gettables import ScheduleGettable
+from qcodes.parameters import ManualParameter
 
+from qsea.experiments.gettable import ScheduleGettable
 from qsea.experiments.saving import save_retrieve_acquisition_dataset
 
 
@@ -79,13 +79,17 @@ def batched_parameter(name, unit="", label=None, batch_size=None):
 
 
 class NodeBase:
-    """Holds the runtime instruments shared by every node."""
+    """Holds the runtime instruments shared by every node.
 
-    def __init__(self, quantum_device, meas_ctrl, acq_delay, instrument_coordinator=None):
-        self.quantum_device = quantum_device
+    ``agent`` is the qblox-scheduler ``HardwareAgent`` (:func:`qsea.experiments.agent.make_agent`);
+    ``quantum_device`` is its device, which the nodes update.
+    """
+
+    def __init__(self, agent, meas_ctrl, acq_delay):
+        self.agent = agent
+        self.quantum_device = agent.quantum_device
         self.meas_ctrl = meas_ctrl
         self.acq_delay = acq_delay
-        self.instrument_coordinator = instrument_coordinator
         self.history = []
         self._tuids = []
 
@@ -100,10 +104,11 @@ class NodeBase:
         ``grid=True``, a list of arrays (``meas_ctrl.setpoints_grid``).
         ``gettable_kwargs`` go to ``ScheduleGettable`` (``real_imag``,
         ``num_channels``, ``max_batch_size``); ``batched`` is always True.
-        Returns the dataset and records its TUID for the history.
+        Returns the dataset and records its TUID for the history. The gettable is
+        :class:`qsea.experiments.gettable.ScheduleGettable`, running on ``self.agent``.
         """
         gettable = ScheduleGettable(
-            self.quantum_device,
+            self.agent,
             schedule_function=schedule_function,
             schedule_kwargs=schedule_kwargs,
             batched=True,
@@ -115,7 +120,7 @@ class NodeBase:
             self.meas_ctrl.setpoints_grid(setpoints)
         else:
             self.meas_ctrl.setpoints(setpoints)
-        self.quantum_device.cfg_sched_repetitions(repetitions)
+        self.quantum_device.cfg_sched_repetitions = repetitions
 
         run_kwargs = {} if soft_avg is None else {"soft_avg": soft_avg}
         dataset = self.meas_ctrl.run(label, **run_kwargs)
@@ -124,15 +129,8 @@ class NodeBase:
             self._tuids.append(tuid)
         return dataset
 
-    def _require_instrument_coordinator(self, node_name):
-        if self.instrument_coordinator is None:
-            raise RuntimeError(
-                f"{node_name} requires instrument_coordinator to be set on "
-                "CalibrationNodes -- pass instrument_coordinator=ic to the constructor."
-            )
-
     def _save_raw(self, dataset, name, **attrs):
-        """Save a raw ``retrieve_acquisition()`` dataset to the data directory.
+        """Save a raw acquisition dataset (from :mod:`qsea.experiments.runners`) to the data directory.
 
         ``attrs`` (typically the swept setpoints) are stored on the saved copy.
         A failed save only warns: the measurement already happened and the
@@ -178,10 +176,10 @@ class NodeBase:
 
     @staticmethod
     def _assign_acq_channels(qubits):
-        """Map ``qubits[i]`` to acquisition channel ``i``.
+        """Map ``qubits[i]`` to acquisition label ``i`` (``measure.acq_label``).
 
         Left in place afterwards on purpose: later multi-qubit runs in the
         notebook (e.g. GST) rely on the same mapping.
         """
         for i, qubit in enumerate(qubits):
-            qubit.measure.acq_channel(i)
+            qubit.measure.acq_label = i

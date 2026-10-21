@@ -3,11 +3,24 @@
 from typing import Iterable
 
 import numpy as np
-from quantify_scheduler.device_under_test.transmon_element import BasicTransmonElement
+from qblox_applications.qblox_scheduler.superconducting.transmon import BasicTransmonElement
 
 from qsea.experiments.nodes._base import NodeBase, batched_parameter, node
 from qsea.fitting.fits import rpe_quadrature_fit, rpe_rate_fit
 from qsea.schedules.two_qubit import iswap_RPE_f, iswap_RPE_theta_sum
+
+
+class _Attribute:
+    """``p()`` reads and ``p(value)`` writes ``obj.<name>`` (a qcodes-parameter-style handle)."""
+
+    def __init__(self, obj, name):
+        self.obj, self.name = obj, name
+
+    def __call__(self, *value):
+        if value:
+            setattr(self.obj, self.name, value[0])
+            return None
+        return getattr(self.obj, self.name)
 
 
 class IswapStarkNodes(NodeBase):
@@ -21,21 +34,22 @@ class IswapStarkNodes(NodeBase):
     # snapshot, next to the pump frequency they belong to.
     # ------------------------------------------------------------------
     def _stark_edge_params(self, qubits):
-        """The edge's ``(ac_stark_phase for qubits[0], for qubits[1])``
-        qcodes parameters, in ``qubits`` order."""
+        """The edge's ``(ac_stark_phase for qubits[0], for qubits[1])``, in ``qubits`` order,
+        as callables that read (``p()``) and write (``p(value)``) the edge attribute,
+        like the qcodes parameters they were in qqea."""
         for edge_name, swapped in ((f"{qubits[0].name}_{qubits[1].name}", False),
                                    (f"{qubits[1].name}_{qubits[0].name}", True)):
             try:
                 edge = self.quantum_device.get_edge(edge_name)
             except KeyError:
                 continue
-            params = edge.iswap.parameters
-            if "ac_stark_phase_q1" not in params or "ac_stark_phase_q2" not in params:
+            iswap = getattr(edge, "iswap", None)
+            if not (hasattr(iswap, "ac_stark_phase_q1") and hasattr(iswap, "ac_stark_phase_q2")):
                 raise RuntimeError(
                     f"Edge {edge_name} has no iswap.ac_stark_phase_q1/q2 parameters -- "
                     "update the CompositeiSWAPEdge definition."
                 )
-            pair = (params["ac_stark_phase_q1"], params["ac_stark_phase_q2"])
+            pair = (_Attribute(iswap, "ac_stark_phase_q1"), _Attribute(iswap, "ac_stark_phase_q2"))
             return pair[::-1] if swapped else pair
         raise RuntimeError(f"No iSWAP edge between {qubits[0].name} and {qubits[1].name}.")
 

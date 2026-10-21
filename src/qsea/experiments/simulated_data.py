@@ -161,10 +161,10 @@ def get_simulated_rb_data(
 def gate_strings_from_schedule(compiled_schedule) -> list:
     """Split the gate unitaries of a compiled schedule at each reset.
 
-    Uses quantify-scheduler's private ``_walk_schedule``, so it may need
-    updating when quantify-scheduler is upgraded.
+    Uses qblox-scheduler's private ``_walk_schedule``, so it may need
+    updating when qblox-scheduler is upgraded.
     """
-    from quantify_scheduler.schedules._visualization.circuit_diagram import _walk_schedule
+    from qblox_scheduler.schedules._visualization.circuit_diagram import _walk_schedule
 
     gate_string = []
     for _, operation in _walk_schedule(compiled_schedule):

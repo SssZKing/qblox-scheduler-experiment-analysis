@@ -1,18 +1,16 @@
 """Dry runs: exercise the calibration nodes on a dummy Qblox cluster.
 
-For use in the ``qblox_dev`` env only, never against the live setup. In a dry
-run the schedules are compiled and uploaded to a qblox-instruments dummy
-cluster, so compilation, ``meas_ctrl`` and the analysis all run; only the
-acquired data is fake. Example::
+Never against the live setup. In a dry run the schedules are compiled and uploaded
+to a qblox-instruments dummy cluster, so compilation, ``meas_ctrl`` and the analysis
+all run; only the acquired data is fake. Example::
 
     from qsea.experiments import dry_run
 
-    cluster = dry_run.dummy_cluster(hardware_cfg)      # instead of Cluster(..., identifier=ip)
-    ...  # build ic, meas_ctrl, quantum_device and the qubits as usual
-    nodes = CalibrationNodes(quantum_device, meas_ctrl, ACQ_DELAY, instrument_coordinator=ic)
+    agent = dry_run.dummy_agent()                      # instead of make_agent(cluster_ip=...)
+    nodes = CalibrationNodes(agent, meas_ctrl, ACQ_DELAY)
 
     with dry_run.simulate(dry_run.readout_data()):
-        ok, fid = nodes.readout_calibration(qubit1)
+        ok, fid = nodes.readout_calibration(agent.quantum_device.get_element("qubit1"))
 
 Without :func:`simulate` the dummy cluster returns empty data, which still
 checks that every node compiles, runs, and fails cleanly with ``(False, None)``.
@@ -29,38 +27,12 @@ from qsea.experiments.simulated_data import (
     gate_strings_from_schedule,
 )
 
-# hardware_description instrument_type -> qblox_instruments.ClusterType member
-_MODULE_TYPES = {
-    "QCM": "CLUSTER_QCM",
-    "QCM_RF": "CLUSTER_QCM_RF",
-    "QRM": "CLUSTER_QRM",
-    "QRM_RF": "CLUSTER_QRM_RF",
-    "QTM": "CLUSTER_QTM",
-}
+def dummy_agent(device=None, hardware_config=None, **kwargs):
+    """A ``HardwareAgent`` on a qblox-instruments dummy cluster with the modules of the
+    hardware config (defaults: the lab configs). See :func:`qsea.experiments.agent.make_agent`."""
+    from qsea.experiments.agent import make_agent
 
-
-def dummy_cluster(hardware_cfg, name=None):
-    """A qblox-instruments dummy ``Cluster`` with the modules of ``hardware_cfg``.
-
-    ``hardware_cfg`` is the quantify hardware compilation config; its
-    ``hardware_description`` names the cluster and the instrument type in each
-    slot. ``name`` defaults to the cluster's name in that description, so the
-    rest of the config works unchanged.
-    """
-    from qblox_instruments import Cluster, ClusterType
-
-    clusters = {
-        key: value for key, value in hardware_cfg["hardware_description"].items()
-        if value.get("instrument_type") == "Cluster"
-    }
-    if len(clusters) != 1:
-        raise ValueError(f"Expected one Cluster in hardware_description, found {len(clusters)}.")
-    cluster_name, description = next(iter(clusters.items()))
-    dummy_cfg = {
-        int(slot): getattr(ClusterType, _MODULE_TYPES[module["instrument_type"]])
-        for slot, module in description["modules"].items()
-    }
-    return Cluster(name=name or cluster_name, dummy_cfg=dummy_cfg)
+    return make_agent(device, hardware_config, dummy=True, **kwargs)
 
 
 @contextlib.contextmanager
@@ -72,7 +44,7 @@ def simulate(data_function):
     and is converted to magnitude/phase (degrees) when the gettable was made
     with ``real_imag=False``. The original ``get`` is restored on exit.
     """
-    from quantify_scheduler.gettables import ScheduleGettable
+    from qsea.experiments.gettable import ScheduleGettable
 
     original_get = ScheduleGettable.get
 

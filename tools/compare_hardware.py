@@ -146,9 +146,7 @@ def dump_qqea(qqea, snapshot, only):
         log = []
         env = {"qd": qd, "q1": q1, "q2": q2, "ic": tool.FakeCoordinator(), "mod": mod,
                "pump": tool.FakeSource("TWPA_pump", log), "snail": tool.FakeSource("snail_drive", log)}
-        fn = getattr(mod, func, None)
-        if fn is None:
-            return None  # moved to experiments.runners
+        fn = getattr(mod, func, None) or tool._moved_runner(func)  # runners moved to experiments
         value = fn(**make_kwargs(env))
         compiled = list(env["ic"].compiled)  # builders that compile and prepare themselves
         if isinstance(value, ScheduleBase):
@@ -180,7 +178,13 @@ def dump_qsea(only, device=DEVICE, hardware=HARDWARE):
         env = {"qd": qd, "q1": qd.get_element("qubit1"), "q2": qd.get_element("qubit2"),
                "ic": tool.FakeCoordinator(), "mod": mod,
                "pump": tool.FakeSource("TWPA_pump", log), "snail": tool.FakeSource("snail_drive", log)}
-        value = getattr(mod, func)(**make_kwargs(env))
+        env["agent"] = tool.FakeAgent(qd, env["ic"])
+        if func in tool.RUNNERS:
+            runners = importlib.import_module("qsea.experiments.runners")
+            getattr(runners, tool.RUNNERS[func])(**tool._runner_kwargs(make_kwargs(env), env))
+            value = None
+        else:
+            value = getattr(mod, func)(**make_kwargs(env))
         compiled = list(env["ic"].compiled)  # builders that compile and prepare themselves
         if isinstance(value, TimeableScheduleBase):
             compiled.append(SerialCompiler(name="hw").compile(value, config=qd.generate_compilation_config()))

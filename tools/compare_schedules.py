@@ -54,14 +54,18 @@ sys.dont_write_bytecode = True
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REFERENCE = os.path.join(REPO, "tests", "schedules", "reference", "qqea-4de2850.json")
 
-# The DRAG and readout-optimization runners run on the cluster; they move with the
-# calibration nodes (MIGRATION_PLAN.md, phase 4).
-PENDING = {
-    "readout_freq_optimization": "phase 4 (experiments.runners)",
-    "readout_amp_optimization": "phase 4 (experiments.runners)",
-    "readout_len_optimization": "phase 4 (experiments.runners)",
-    "readout_weight_optimization": "phase 4 (experiments.runners)",
-    "drag_calibration": "phase 4 (experiments.runners)",
+# Cases left out of the comparison, with the reason (none at the moment).
+PENDING = {}
+
+# The DRAG and readout-optimization runners moved to qsea.experiments.runners and run on
+# the HardwareAgent: (case function) -> qsea runner. Their old ``instrument_coordinator`` and
+# ``quantum_device`` arguments become ``agent``, and the DRAG sweep is in rxy.beta.
+RUNNERS = {
+    "readout_freq_optimization_TWPA": "readout_freq_optimization",
+    "readout_amp_optimization_TWPA": "readout_amp_optimization",
+    "readout_len_optimization_TWPA": "readout_len_optimization",
+    "readout_weight_optimization_TWPA": "readout_weight_optimization",
+    "DRAG_calibration_sched": "DRAG_calibration_sched",
 }
 
 # --------------------------------------------------------------------------
@@ -143,6 +147,39 @@ class FakeSource:
             self._log.append([self._name, attr, [_jsonable(a) for a in args], sorted(kwargs)])
 
         return call
+
+
+class FakeAgent:
+    """Stands in for the HardwareAgent: compiles what the runners run, keeps it in ``ic``."""
+
+    def __init__(self, quantum_device, coordinator):
+        self.quantum_device = quantum_device
+        self.coordinator = coordinator
+
+    def run(self, schedule, **kwargs):  # noqa: ARG002
+        import xarray as xr
+        from qblox_scheduler.backends import SerialCompiler
+
+        self.coordinator.compiled.append(SerialCompiler(name="compare").compile(
+            schedule=schedule, config=self.quantum_device.generate_compilation_config()
+        ))
+        return xr.Dataset()
+
+
+def _runner_kwargs(kwargs, env):
+    import numpy as np
+
+    from qsea.device import drag_beta_from_motzoi
+
+    kwargs = dict(kwargs)
+    kwargs.pop("instrument_coordinator", None)
+    kwargs.pop("quantum_device", None)
+    kwargs["agent"] = env["agent"]
+    if "motzoi_list" in kwargs:
+        kwargs["beta_list"] = drag_beta_from_motzoi(
+            np.asarray(kwargs.pop("motzoi_list")), kwargs["qubit"].rxy.duration
+        )
+    return kwargs
 
 
 class FakeCoordinator:
@@ -410,9 +447,16 @@ def dump(only, device_path=None):
             "qd": qd, "q1": q1, "q2": q2, "ic": FakeCoordinator(), "mod": mod,
             "pump": FakeSource("TWPA_pump", log), "snail": FakeSource("snail_drive", log),
         }
+        env["agent"] = FakeAgent(qd, env["ic"])
         entry = {"function": f"{module}.{func}"}
         try:
-            value = getattr(mod, func)(**make_kwargs(env))
+            if func in RUNNERS:
+                runners = importlib.import_module("qsea.experiments.runners")
+                value = getattr(runners, RUNNERS[func])(**_runner_kwargs(make_kwargs(env), env))
+                # the runners return acquisition datasets, which qqea's fake coordinator left as None
+                value = [None] * len(value) if isinstance(value, tuple) else None
+            else:
+                value = getattr(mod, func)(**make_kwargs(env))
             schedules = list(env["ic"].compiled)
             if isinstance(value, TimeableScheduleBase):
                 schedules.append(SerialCompiler(name="compare").compile(

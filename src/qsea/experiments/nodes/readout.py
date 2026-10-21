@@ -5,7 +5,7 @@ from typing import Iterable
 
 import numpy as np
 from quantify_core.analysis.readout_calibration_analysis import ReadoutCalibrationAnalysis
-from quantify_scheduler.device_under_test.transmon_element import BasicTransmonElement
+from qblox_applications.qblox_scheduler.superconducting.transmon import BasicTransmonElement
 
 from qsea.experiments.nodes._base import NodeBase, batched_parameter, node
 from qsea.experiments.runners import (
@@ -95,9 +95,8 @@ class ReadoutNodes(NodeBase):
 
         threshold, rotation = _threshold_and_rotation(qoi)
         if update:
-            qubit.measure.acq_threshold(threshold)
-            qubit.measure.acq_rotation(rotation)
-
+            qubit.measure.acq_threshold = threshold
+            qubit.measure.acq_rotation = rotation
         print('Readout Calibrated:')
         print(f'avg fidelity = {avg_fid:.4f}, threshold = {threshold * 1e3:.2f} mV, '
               f'rotation = {rotation:.1f} deg')
@@ -179,8 +178,8 @@ class ReadoutNodes(NodeBase):
             if avg_fid > fidelity_threshold:
                 threshold, rotation = _threshold_and_rotation(qoi)
                 if update:
-                    qubit.measure.acq_threshold(threshold)
-                    qubit.measure.acq_rotation(rotation)
+                    qubit.measure.acq_threshold = threshold
+                    qubit.measure.acq_rotation = rotation
                 print(f'{qubit.name} readout calibrated: fidelity = {avg_fid:.4f}, '
                       f'threshold = {threshold * 1e3:.2f} mV, rotation = {rotation:.1f} deg')
             else:
@@ -197,7 +196,7 @@ class ReadoutNodes(NodeBase):
         """Optimize the readout frequency for maximum ground/excited state SNR.
 
         Like ``drag_calibration``, this bypasses ``meas_ctrl``/``ScheduleGettable``
-        and drives ``self.instrument_coordinator`` directly (via
+        and runs on ``self.agent`` directly (via
         :func:`qsea.experiments.runners.readout_freq_optimization`); the raw
         data is saved to the data directory. For each swept frequency the
         schedule measures the qubit prepared in |g> and |e>; ``RO_freq_fit``
@@ -233,17 +232,14 @@ class ReadoutNodes(NodeBase):
             ``(False, None)``. On success, if ``update`` is True, the qubit's
             readout clock frequency is updated in place.
         """
-        self._require_instrument_coordinator("ro_freq_optimization")
-
         if frequency_setpoints is None:
-            freq_center = qubit.clock_freqs.readout()
+            freq_center = qubit.clock_freqs.readout
             frequency_setpoints = np.linspace(freq_center - freq_span, freq_center + freq_span, num_points)
 
         ro_freq_ds = readout_freq_optimization(
             qubit=qubit,
             frequencies=frequency_setpoints,
-            instrument_coordinator=self.instrument_coordinator,
-            quantum_device=self.quantum_device,
+            agent=self.agent,
             repetitions=repetitions,
         )
         self._save_raw(ro_freq_ds, f"{qubit.name} RO frequency optimization",
@@ -257,8 +253,7 @@ class ReadoutNodes(NodeBase):
             return False, None
 
         if update:
-            qubit.clock_freqs.readout(optimal_freq)
-
+            qubit.clock_freqs.readout = optimal_freq
         return True, optimal_freq
 
     @node
@@ -301,17 +296,14 @@ class ReadoutNodes(NodeBase):
             ``(False, None)``. On success, if ``update`` is True, the qubit's
             readout pulse amplitude is updated in place.
         """
-        self._require_instrument_coordinator("ro_amp_optimization")
-
         if amp_setpoints is None:
-            base_amp = qubit.measure.pulse_amp()
+            base_amp = qubit.measure.pulse_amp
             amp_setpoints = np.linspace(base_amp * 0.8, base_amp * 1.2, num_points)
 
         ro_amp_ds = readout_amp_optimization(
             qubit=qubit,
             amps=amp_setpoints,
-            instrument_coordinator=self.instrument_coordinator,
-            quantum_device=self.quantum_device,
+            agent=self.agent,
             repetitions=repetitions,
         )
         self._save_raw(ro_amp_ds, f"{qubit.name} RO amplitude optimization",
@@ -324,8 +316,7 @@ class ReadoutNodes(NodeBase):
             return False, None
 
         if update:
-            qubit.measure.pulse_amp(optimal_amp)
-
+            qubit.measure.pulse_amp = optimal_amp
         return True, optimal_amp
 
     @node
@@ -370,17 +361,14 @@ class ReadoutNodes(NodeBase):
             readout pulse duration and integration time are both updated in
             place.
         """
-        self._require_instrument_coordinator("ro_len_optimization")
-
         if len_setpoints is None:
-            base_len = qubit.measure.pulse_duration()
+            base_len = qubit.measure.pulse_duration
             len_setpoints = base_len + 0.1e-6 * (np.arange(num_points) - num_points // 2)
 
         ro_len_ds = readout_len_optimization(
             qubit=qubit,
             lens=len_setpoints,
-            instrument_coordinator=self.instrument_coordinator,
-            quantum_device=self.quantum_device,
+            agent=self.agent,
             repetitions=repetitions,
         )
         self._save_raw(ro_len_ds, f"{qubit.name} RO duration optimization",
@@ -393,9 +381,8 @@ class ReadoutNodes(NodeBase):
             return False, None
 
         if update:
-            qubit.measure.pulse_duration(optimal_duration)
-            qubit.measure.integration_time(optimal_duration)
-
+            qubit.measure.pulse_duration = optimal_duration
+            qubit.measure.integration_time = optimal_duration
         return True, optimal_duration
 
     @node
@@ -419,8 +406,7 @@ class ReadoutNodes(NodeBase):
         lo_freq : float, optional
             Readout LO frequency, needed to demodulate the raw trace to
             baseband. Defaults to the LO frequency configured for this
-            qubit's readout portclock in
-            ``quantum_device.generate_hardware_config()``.
+            qubit's readout portclock in the agent's hardware config.
         division_length : int, optional
             Number of consecutive 1 ns samples averaged into each weight bin
             before upsampling back (default 10; smooths noise out of the
@@ -440,19 +426,15 @@ class ReadoutNodes(NodeBase):
             ``(False, None)``. On success, if ``update`` is True, the qubit's
             acq_weights_a/acq_weights_b are updated in place.
         """
-        self._require_instrument_coordinator("ro_weight_calibration")
-
         if lo_freq is None:
             portclock = f"{qubit.name}:res-{qubit.name}.ro"
-            lo_freq = (
+            hardware_config = getattr(self.agent, "hardware_config_dict", None) or \
                 self.quantum_device.generate_hardware_config()
-                ['hardware_options']['modulation_frequencies'][portclock]['lo_freq']
-            )
+            lo_freq = hardware_config['hardware_options']['modulation_frequencies'][portclock]['lo_freq']
 
         g_trace, e_trace = readout_weight_optimization(
             qubit=qubit,
-            instrument_coordinator=self.instrument_coordinator,
-            quantum_device=self.quantum_device,
+            agent=self.agent,
             repetitions=repetitions,
         )
         for state, trace in (("g", g_trace), ("e", e_trace)):
@@ -470,7 +452,6 @@ class ReadoutNodes(NodeBase):
 
         weights_a, weights_b = weights
         if update:
-            qubit.measure.acq_weights_a(weights_a)
-            qubit.measure.acq_weights_b(weights_b)
-
+            qubit.measure.acq_weights_a = weights_a
+            qubit.measure.acq_weights_b = weights_b
         return True, weights

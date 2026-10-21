@@ -1,19 +1,23 @@
 """Calibration nodes extracted from the SNL315 notebook.
 
 Each measurement/calibration routine ("node") is a method of
-:class:`CalibrationNodes`. The shared runtime instruments
-(``quantum_device``, ``meas_ctrl``, ``instrument_coordinator``) and constants
-(``ACQ_DELAY``) are held on the instance, so the notebook only needs to
-construct the object once::
+:class:`CalibrationNodes`. The shared runtime instruments (the qblox-scheduler
+``HardwareAgent`` and ``meas_ctrl``) and constants (``ACQ_DELAY``) are held on the
+instance, so the notebook only needs to construct the object once::
 
+    from quantify_core.measurement import MeasurementControl
+    from qsea.experiments.agent import make_agent
     from qsea.experiments.calibration_nodes import CalibrationNodes
-    nodes = CalibrationNodes(quantum_device, meas_ctrl, ACQ_DELAY, instrument_coordinator=ic)
+
+    agent = make_agent()                      # configs/ + QBLOX_CLUSTER_IP
+    meas_ctrl = MeasurementControl("meas_ctrl")
+    nodes = CalibrationNodes(agent, meas_ctrl, ACQ_DELAY)
+    qubit1 = agent.quantum_device.get_element("qubit1")
     ok, fr = nodes.resonator_calibration(qubit1, amp=..., duration=...)
 
-``instrument_coordinator`` is only needed by the nodes that drive the
-instrument coordinator directly instead of going through ``meas_ctrl``
-(``drag_calibration`` and the ``ro_*_optimization``/``ro_weight_calibration``
-nodes); it can be omitted if you never call those.
+Sweeps run through ``meas_ctrl`` with :class:`qsea.experiments.gettable.ScheduleGettable`
+on the agent, so the datasets are the same as qqea's. ``drag_calibration`` and the
+``ro_*_optimization``/``ro_weight_calibration`` nodes run on the agent directly.
 
 The ``qubit`` object stays a per-call argument since it changes between nodes.
 
@@ -38,10 +42,10 @@ class CalibrationNodes(SingleQubitNodes, ReadoutNodes, IswapStarkNodes, RoadmapN
 
     Parameters
     ----------
-    quantum_device : QuantumDevice
+    agent : HardwareAgent
+        From :func:`qsea.experiments.agent.make_agent`; ``agent.quantum_device`` is the
+        device the nodes read and update.
     meas_ctrl : MeasurementControl
     acq_delay : float
         Acquisition delay (time of flight) in seconds, used by resonator spectroscopy.
-    instrument_coordinator : InstrumentCoordinator, optional
-        Needed only by the nodes that bypass ``meas_ctrl``.
     """

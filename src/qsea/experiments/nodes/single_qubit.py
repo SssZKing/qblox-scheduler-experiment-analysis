@@ -5,12 +5,13 @@ from typing import Iterable
 
 import matplotlib.pyplot as plt
 import numpy as np
-from qcodes import ManualParameter
+from qcodes.parameters import ManualParameter
 from quantify_core.analysis.single_qubit_timedomain import AllXYAnalysis, RabiAnalysis
 from quantify_core.analysis.spectroscopy_analysis import ResonatorSpectroscopyAnalysis
-from quantify_scheduler.device_under_test.transmon_element import BasicTransmonElement
+from qblox_applications.qblox_scheduler.superconducting.transmon import BasicTransmonElement
 
 from qsea.experiments.nodes._base import NodeBase, batched_parameter, node
+from qsea.device import drag_beta_from_motzoi
 from qsea.experiments.runners import DRAG_calibration_sched
 from qsea.fitting.fits import (
     DRAG_fit,
@@ -70,7 +71,7 @@ class SingleQubitNodes(NodeBase):
             readout clock frequency is updated in place.
         """
         if frequency_setpoints is None:
-            freq_center = qubit.clock_freqs.readout()
+            freq_center = qubit.clock_freqs.readout
             frequency_setpoints = np.linspace(freq_center - 2e6, freq_center + 2e6, 800)
 
         freq = batched_parameter("freq", unit="Hz", label="Frequency",
@@ -82,7 +83,7 @@ class SingleQubitNodes(NodeBase):
             acquisition_delay=self.acq_delay,
             integration_time=duration,
             init_duration=10e-6,
-            port=qubit.ports.readout(),
+            port=qubit.ports.readout,
             clock=qubit.name + ".ro",
         )
         rs_ds = self._run_sweep(
@@ -110,8 +111,7 @@ class SingleQubitNodes(NodeBase):
         )
 
         if update:
-            qubit.clock_freqs.readout(fr)
-
+            qubit.clock_freqs.readout = fr
         return True, fr
 
     @node
@@ -122,8 +122,8 @@ class SingleQubitNodes(NodeBase):
                                    repetitions=100, update=True):
         """Calibrate the qubit f01 frequency via a Ramsey chevron measurement.
 
-        The chevron runs with DRAG off (``rxy.motzoi`` = 0): with DRAG on, Qblox
-        rejects the sequence as too long. The previous motzoi is restored once
+        The chevron runs with DRAG off (``rxy.beta`` = 0): with DRAG on, Qblox
+        rejects the sequence as too long. The previous beta is restored once
         the measurement is done, so a chevron after a DRAG calibration does not
         undo it.
 
@@ -162,8 +162,8 @@ class SingleQubitNodes(NodeBase):
             "artificial_detuning": detuning,
         }
 
-        prev_motzoi = qubit.rxy.motzoi()
-        qubit.rxy.motzoi(0)
+        prev_beta = qubit.rxy.beta
+        qubit.rxy.beta = 0.0
         try:
             ram_che_ds = self._run_sweep(
                 ramsey_sched, ramsey_sched_kwargs, [tau, detuning],
@@ -172,7 +172,7 @@ class SingleQubitNodes(NodeBase):
                 real_imag=True, max_batch_size=tau_setpoints.size,
             )
         finally:
-            qubit.rxy.motzoi(prev_motzoi)
+            qubit.rxy.beta = prev_beta
 
         f01 = self._try_fit(
             ramsey_chevron_fit, ram_che_ds.tuid, qubit,
@@ -184,8 +184,7 @@ class SingleQubitNodes(NodeBase):
             return False, None
 
         if update:
-            qubit.clock_freqs.f01(f01)
-
+            qubit.clock_freqs.f01 = f01
         return True, f01
 
     @node
@@ -219,8 +218,8 @@ class SingleQubitNodes(NodeBase):
                                            label="Rabi Pulse Amplitude", batch_size=200)
         rabi_sched_kwargs = {
             "pulse_amp": rabi_pulse_amp,
-            "pulse_duration": qubit.rxy.duration(),
-            "frequency": qubit.clock_freqs.f01(),
+            "pulse_duration": qubit.rxy.duration,
+            "frequency": qubit.clock_freqs.f01,
             "qubit": qubit,
         }
         rabi_ds = self._run_sweep(
@@ -243,8 +242,7 @@ class SingleQubitNodes(NodeBase):
         print(f'amp180 = {amp180:.4f} V')
 
         if update:
-            qubit.rxy.amp180(amp180)
-
+            qubit.rxy.amp180 = amp180
         return True, amp180
 
     @node
@@ -285,7 +283,7 @@ class SingleQubitNodes(NodeBase):
             place.
         """
         if rabi_amplitude_setpoints is None:
-            amp180 = qubit.rxy.amp180()
+            amp180 = qubit.rxy.amp180
             rabi_amplitude_setpoints = np.linspace(amp180 - 0.025, amp180 + 0.025, 21)
 
         rabi_pulse_amp = batched_parameter("rabi_pulse_amplitude", unit="V",
@@ -294,8 +292,8 @@ class SingleQubitNodes(NodeBase):
 
         rabi_sched_kwargs = {
             "pulse_amp": rabi_pulse_amp,
-            "pulse_duration": qubit.rxy.duration(),
-            "frequency": qubit.clock_freqs.f01(),
+            "pulse_duration": qubit.rxy.duration,
+            "frequency": qubit.clock_freqs.f01,
             "qubit": qubit,
             "pi_number": pi_number,
         }
@@ -313,8 +311,7 @@ class SingleQubitNodes(NodeBase):
             return False, None
 
         if update:
-            qubit.rxy.amp180(amp180)
-
+            qubit.rxy.amp180 = amp180
         return True, amp180
 
     def _decay_calibration(self, qubit, schedule_function, run_label, quantity,
@@ -563,60 +560,70 @@ class SingleQubitNodes(NodeBase):
 
     @node
     def drag_calibration(self, qubit: BasicTransmonElement,
-                         motzoi_list=np.linspace(-0.1, 0.1, 41),
-                         repetitions=1000, plot=False, update=True):
-        """Calibrate the DRAG motzoi coefficient of a qubit.
+                         beta_list=None, repetitions=1000, plot=False, update=True,
+                         motzoi_list=None):
+        """Calibrate the DRAG coefficient ``rxy.beta`` of a qubit.
 
         Unlike the sweep nodes, this measurement bypasses meas_ctrl/ScheduleGettable
-        and drives the instrument coordinator directly
+        and runs on the agent directly
         (:func:`qsea.experiments.runners.DRAG_calibration_sched`), since it needs
         the raw complex acquisition. The raw data is saved to the data
-        directory with ``motzoi_list`` stored as an attribute. Requires
-        ``instrument_coordinator`` to have been passed to the constructor.
+        directory with ``beta_list`` stored as an attribute.
+
+        qblox-scheduler's ``beta`` is quantify-scheduler's ``motzoi`` times sigma
+        (``duration / 8``, :func:`qsea.device.drag_beta_from_motzoi`), so it is in seconds:
+        about -7e-10 for a 100 ns pulse with motzoi -0.057.
 
         Parameters
         ----------
         qubit : BasicTransmonElement
             The qubit object to calibrate.
-        motzoi_list : np.ndarray, optional
-            Motzoi coefficients to sweep (default ``np.linspace(-0.1, 0.1, 41)``).
+        beta_list : np.ndarray, optional
+            ``rxy.beta`` values to sweep. Defaults to ``motzoi_list`` converted with the
+            qubit's ``rxy.duration``.
         repetitions : int, optional
             Number of repetitions for averaging (default 1000).
         plot : bool, optional
             Whether to display the DRAG fit figure (default False).
         update : bool, optional
-            Whether to write the fitted motzoi back to the qubit on success
+            Whether to write the fitted beta back to the qubit on success
             (default True).
+        motzoi_list : np.ndarray, optional
+            The sweep in qqea's motzoi units, used when ``beta_list`` is not given
+            (default ``np.linspace(-0.1, 0.1, 41)``, as in qqea).
 
         Returns
         -------
         (bool, float or None)
-            ``(True, motzoi)`` if the fit is trustworthy, else ``(False, None)``.
-            On success, if ``update`` is True, the qubit's rxy.motzoi is
+            ``(True, beta)`` if the fit is trustworthy, else ``(False, None)``.
+            On success, if ``update`` is True, the qubit's rxy.beta is
             updated in place.
         """
-        self._require_instrument_coordinator("drag_calibration")
+        if beta_list is None:
+            if motzoi_list is None:
+                motzoi_list = np.linspace(-0.1, 0.1, 41)
+            beta_list = drag_beta_from_motzoi(np.asarray(motzoi_list), qubit.rxy.duration)
+        beta_list = np.asarray(beta_list)
 
         drag_ds = DRAG_calibration_sched(
             qubit=qubit,
-            motzoi_list=motzoi_list,
-            instrument_coordinator=self.instrument_coordinator,
-            quantum_device=self.quantum_device,
+            beta_list=beta_list,
+            agent=self.agent,
             repetitions=repetitions,
         )
         self._save_raw(drag_ds, f"{qubit.name} DRAG calibration",
-                       motzoi_list=np.asarray(motzoi_list), repetitions=repetitions)
+                       beta_list=beta_list, repetitions=repetitions)
 
-        motzoi = self._try_fit(DRAG_fit, drag_ds, motzoi_list, plot=plot)
+        beta = self._try_fit(DRAG_fit, drag_ds, beta_list, plot=plot)
 
-        if motzoi is None or not np.isfinite(motzoi):
+        if beta is None or not np.isfinite(beta):
             print("DRAG fit failed. Please check the data.")
             return False, None
 
         if update:
-            qubit.rxy.motzoi(motzoi)
+            qubit.rxy.beta = beta
 
-        return True, motzoi
+        return True, beta
 
     @node
     def allxy_calibration(self, qubit: BasicTransmonElement,
@@ -627,7 +634,7 @@ class SingleQubitNodes(NodeBase):
         is no physical parameter to write back to the qubit, and no R² gate.
         ``AllXYAnalysis`` compares the 21-element AllXY sequence against its
         ideal curve and reports the mean absolute deviation; a low deviation
-        indicates amp180/motzoi/frequency are well calibrated, while a
+        indicates amp180/beta/frequency are well calibrated, while a
         systematic deviation points to a specific gate error (see the AllXY
         figure for which elements deviate).
 

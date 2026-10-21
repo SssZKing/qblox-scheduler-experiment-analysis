@@ -1,6 +1,6 @@
 """CalibrationNodes plumbing with fake instruments: no cluster, no data directory.
 
-Run in the qblox_dev env (never qblox_env):  python -m pytest tests/experiments
+Run in qbs_env:  python -m pytest tests/experiments
 """
 
 import numpy as np
@@ -22,16 +22,21 @@ class FakeParam:
 
 
 class Namespace:
+    """Element parameters are plain attributes in qblox-scheduler."""
+
     def __init__(self, **params):
         for key, value in params.items():
-            setattr(self, key, FakeParam(value))
+            setattr(self, key, value)
+
+
+BETA = -7e-10
 
 
 class FakeQubit:
     def __init__(self, name="qubit1"):
         self.name = name
-        self.rxy = Namespace(motzoi=0.03, amp180=0.4, duration=100e-9)
-        self.measure = Namespace(acq_channel=0, pulse_duration=2e-6)
+        self.rxy = Namespace(beta=BETA, amp180=0.4, duration=100e-9)
+        self.measure = Namespace(acq_label=0, pulse_duration=2e-6)
         self.clock_freqs = Namespace(f01=4.5e9, readout=7.1e9)
 
 
@@ -71,14 +76,19 @@ class FakeMeasCtrl:
 
 class FakeDevice:
     def __init__(self):
-        self.cfg_sched_repetitions = FakeParam(1)
+        self.cfg_sched_repetitions = 1
+
+
+class FakeAgent:
+    def __init__(self):
+        self.quantum_device = FakeDevice()
 
 
 @pytest.fixture
 def fake_gettable(monkeypatch):
     made = []
 
-    def gettable(device, **kwargs):
+    def gettable(agent, **kwargs):
         made.append(kwargs)
         return kwargs
 
@@ -86,8 +96,8 @@ def fake_gettable(monkeypatch):
     return made
 
 
-def make_nodes(meas_ctrl=None, **kwargs):
-    return CalibrationNodes(FakeDevice(), meas_ctrl or FakeMeasCtrl(), 216e-9, **kwargs)
+def make_nodes(meas_ctrl=None):
+    return CalibrationNodes(FakeAgent(), meas_ctrl or FakeMeasCtrl(), 216e-9)
 
 
 def test_every_old_node_is_still_a_method():
@@ -104,10 +114,10 @@ def test_every_old_node_is_still_a_method():
         assert callable(getattr(CalibrationNodes, name)), name
 
 
-def test_ramsey_chevron_runs_with_motzoi_zero_and_restores_it(monkeypatch, fake_gettable):
+def test_ramsey_chevron_runs_with_beta_zero_and_restores_it(monkeypatch, fake_gettable):
     qubit = FakeQubit()
     seen = []
-    meas_ctrl = FakeMeasCtrl(on_run=lambda: seen.append(qubit.rxy.motzoi()))
+    meas_ctrl = FakeMeasCtrl(on_run=lambda: seen.append(qubit.rxy.beta))
     nodes = make_nodes(meas_ctrl)
     monkeypatch.setattr(single_qubit, "ramsey_chevron_fit", lambda tuid, q, **kw: 4.501e9)
 
@@ -115,13 +125,13 @@ def test_ramsey_chevron_runs_with_motzoi_zero_and_restores_it(monkeypatch, fake_
 
     assert (ok, f01) == (True, 4.501e9)
     assert seen == [0]
-    assert qubit.rxy.motzoi() == 0.03
-    assert qubit.clock_freqs.f01() == 4.501e9
+    assert qubit.rxy.beta == BETA
+    assert qubit.clock_freqs.f01 == 4.501e9
     assert fake_gettable[0]["max_batch_size"] == np.arange(0, 20e-6, 0.2e-6).size
     assert [name for name, _ in meas_ctrl.calls] == ["gettables", "settables", "setpoints_grid"]
 
 
-def test_ramsey_chevron_restores_motzoi_when_the_run_fails(monkeypatch, fake_gettable):
+def test_ramsey_chevron_restores_beta_when_the_run_fails(monkeypatch, fake_gettable):
     qubit = FakeQubit()
 
     def fail():
@@ -130,7 +140,7 @@ def test_ramsey_chevron_restores_motzoi_when_the_run_fails(monkeypatch, fake_get
     nodes = make_nodes(FakeMeasCtrl(on_run=fail))
     with pytest.raises(ConnectionError):
         nodes.ramsey_chevron_calibration(qubit)
-    assert qubit.rxy.motzoi() == 0.03
+    assert qubit.rxy.beta == BETA
     entry = nodes.history[-1]
     assert entry["node"] == "ramsey_chevron_calibration"
     assert entry["ok"] is False and "ConnectionError" in entry["error"]
@@ -165,10 +175,9 @@ def test_history_records_value_and_tuids(monkeypatch, fake_gettable):
     assert entry["tuids"] == ["20261009-000000-000-000001"]
 
 
-def test_drag_saves_raw_data_and_updates_motzoi(monkeypatch):
+def test_drag_saves_raw_data_and_updates_beta(monkeypatch):
     saved = []
-    monkeypatch.setattr(single_qubit, "DRAG_calibration_sched", lambda **kw: "raw")
-    monkeypatch.setattr(single_qubit, "DRAG_fit", lambda ds, motzoi, plot: 0.012)
+    monkeypatch.setattr(single_qubit, "DRAG_fit", lambda ds, beta_list, plot: -5e-10)
 
     class Raw:
         attrs = {}
@@ -179,13 +188,14 @@ def test_drag_saves_raw_data_and_updates_motzoi(monkeypatch):
     monkeypatch.setattr(single_qubit, "DRAG_calibration_sched", lambda **kw: Raw())
     monkeypatch.setattr(_base, "save_retrieve_acquisition_dataset",
                         lambda ds, name: saved.append((name, dict(ds.attrs))) or "TUID-1")
-    nodes = make_nodes(instrument_coordinator=object())
+    nodes = make_nodes()
     qubit = FakeQubit()
 
-    assert nodes.drag_calibration(qubit) == (True, 0.012)
-    assert qubit.rxy.motzoi() == 0.012
+    assert nodes.drag_calibration(qubit) == (True, -5e-10)
+    assert qubit.rxy.beta == -5e-10
     assert saved[0][0] == "qubit1 DRAG calibration"
-    assert len(saved[0][1]["motzoi_list"]) == 41
+    # qqea's default motzoi sweep, converted with rxy.duration = 100 ns
+    assert saved[0][1]["beta_list"] == pytest.approx(np.linspace(-0.1, 0.1, 41) * 100e-9 / 8)
     assert nodes.history[-1]["tuids"] == ["TUID-1"]
 
 
@@ -200,16 +210,11 @@ def test_a_failed_save_only_warns(monkeypatch):
         raise OSError("disk full")
 
     monkeypatch.setattr(single_qubit, "DRAG_calibration_sched", lambda **kw: Raw())
-    monkeypatch.setattr(single_qubit, "DRAG_fit", lambda ds, motzoi, plot: 0.0)
+    monkeypatch.setattr(single_qubit, "DRAG_fit", lambda ds, beta_list, plot: 0.0)
     monkeypatch.setattr(_base, "save_retrieve_acquisition_dataset", broken_save)
-    nodes = make_nodes(instrument_coordinator=object())
+    nodes = make_nodes()
     with pytest.warns(UserWarning, match="disk full"):
         assert nodes.drag_calibration(FakeQubit()) == (True, 0.0)
-
-
-def test_drag_without_instrument_coordinator_raises():
-    with pytest.raises(RuntimeError, match="instrument_coordinator"):
-        make_nodes().drag_calibration(FakeQubit())
 
 
 @pytest.mark.parametrize(
@@ -250,15 +255,15 @@ def test_a_fit_that_raises_on_bad_data_is_a_failed_node(monkeypatch):
         def copy(self):
             return self
 
-    def nan_fit(ds, motzoi, plot):
+    def nan_fit(ds, beta_list, plot):
         raise ValueError("array must not contain infs or NaNs")
 
     monkeypatch.setattr(single_qubit, "DRAG_calibration_sched", lambda **kw: Raw())
     monkeypatch.setattr(single_qubit, "DRAG_fit", nan_fit)
     monkeypatch.setattr(_base, "save_retrieve_acquisition_dataset", lambda ds, name: "TUID-2")
-    nodes = make_nodes(instrument_coordinator=object())
+    nodes = make_nodes()
     qubit = FakeQubit()
 
     assert nodes.drag_calibration(qubit) == (False, None)
-    assert qubit.rxy.motzoi() == 0.03
+    assert qubit.rxy.beta == BETA
     assert nodes.history[-1]["ok"] is False and "error" not in nodes.history[-1]

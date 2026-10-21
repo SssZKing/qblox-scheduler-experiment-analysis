@@ -1,29 +1,27 @@
-"""Hardware runners: build a schedule, compile it and run it on the instrument
-coordinator directly, returning the raw ``retrieve_acquisition()`` data.
-
+"""Hardware runners: build a schedule, run it on the ``HardwareAgent`` and return the raw
+acquisitions, in the layout quantify-scheduler's ``InstrumentCoordinator.retrieve_acquisition()``
+had, which the fits in :mod:`qsea.fitting.readout` and ``DRAG_fit`` read.
 These bypass ``meas_ctrl``/``ScheduleGettable`` because the fits need the raw
-complex acquisitions (``BinMode.APPEND``, Trace). Readouts go through
-:func:`qsea.schedules.twpa.measure_with_twpa`, so each qubit's ``twpa_pump``
-setting decides whether the pump is gated on. They moved here from
-``qsea.schedules.single_qubit``. The readout runs dropped their old ``_TWPA``
-suffix, with no aliases: ``readout_freq_optimization_TWPA`` is now
-``readout_freq_optimization``, and likewise for amp, len and weight. Each runner is split into a ``*_schedule`` builder,
-which only builds the schedule, and the run function, which keeps the old
-signature and return value.
-
+complex acquisitions (single shots, Trace). Readouts go through
+:func:`qsea.schedules.twpa.measure_with_twpa`, so each qubit's TWPA setting
+decides whether the pump is gated on. Each runner is split into a ``*_schedule`` builder,
+which only builds the schedule, and the run function.
 ``CalibrationNodes`` saves what these return with
 :func:`qsea.experiments.saving.save_retrieve_acquisition_dataset`; calling a
 runner directly saves nothing, as before.
+
+Changes from qqea: the run functions take the ``HardwareAgent`` instead of
+``instrument_coordinator`` and ``quantum_device``; the DRAG runner sweeps ``rxy.beta``
+(``beta_list``) instead of ``motzoi`` (see :func:`qsea.device.drag_beta_from_motzoi`).
 """
 
 from typing import Union
 
 import numpy as np
-from quantify_scheduler.backends.graph_compilation import SerialCompiler
-from quantify_scheduler.enums import BinMode
-from quantify_scheduler.operations.gate_library import Reset, Rxy, X
-from quantify_scheduler.operations.pulse_library import IdlePulse, SetClockFrequency
-from quantify_scheduler.schedules.schedule import Schedule
+import xarray as xr
+from qblox_scheduler.operations.gate_library import Reset, Rxy, X
+from qblox_scheduler.operations.pulse_library import IdlePulse, SetClockFrequency
+from qblox_scheduler.schedules.schedule import TimeableSchedule
 
 from qsea.schedules.twpa import measure_with_twpa
 
@@ -33,7 +31,8 @@ __all__ = [
     "readout_len_optimization_schedule",
     "readout_weight_optimization_schedule",
     "drag_calibration_schedule",
-    "run_compiled",
+    "legacy_acquisition_layout",
+    "run_schedule",
     "readout_freq_optimization",
     "readout_amp_optimization",
     "readout_len_optimization",
@@ -51,21 +50,43 @@ def _as_1d(values) -> np.ndarray:
     return arr.reshape(arr.shape or (1,))
 
 
-def run_compiled(schedule, quantum_device, instrument_coordinator, timeout_sec):
-    """Compile ``schedule`` for ``quantum_device``, run it and return the acquisitions."""
-    compiler = SerialCompiler(name="compiler")
-    compiled_schedule = compiler.compile(
-        schedule=schedule, config=quantum_device.generate_compilation_config()
-    )
-    instrument_coordinator.prepare(compiled_schedule)
-    instrument_coordinator.start()
-    instrument_coordinator.wait_done(timeout_sec=timeout_sec)
-    return instrument_coordinator.retrieve_acquisition()
+def legacy_acquisition_layout(dataset: xr.Dataset) -> xr.Dataset:
+    """``HardwareAgent.run`` acquisitions in quantify-scheduler's ``retrieve_acquisition()`` layout.
+
+    ``HardwareAgent`` returns single shots flat along ``acq_index_<label>``, with ``acq_index``
+    and ``repetition`` coordinates; quantify-scheduler returned them as a
+    ``(repetition, acq_index_<label>)`` array. Averaged bins and traces already have the old
+    shape and only lose those extra coordinates. Data variables keep their acquisition label
+    as name.
+    """
+    out = xr.Dataset(attrs=dict(dataset.attrs))
+    for label, data in dataset.data_vars.items():
+        dim = data.attrs.get("acq_index_dim_name", data.dims[0])
+        if "repetition" not in data.coords or data.ndim != 1:
+            # drop qblox-scheduler's extra coordinates (acq_index, ...); keep the dimensions'
+            out[label] = data.drop_vars([c for c in data.coords if c not in data.dims])
+            continue
+        reps = data["repetition"].values.astype(int)
+        index = (data["acq_index"].values if "acq_index" in data.coords
+                 else np.arange(data.sizes[dim])).astype(int)
+        rep_values, index_values = np.unique(reps), np.unique(index)
+        values = np.full((rep_values.size, index_values.size), np.nan, dtype=data.dtype)
+        values[np.searchsorted(rep_values, reps), np.searchsorted(index_values, index)] = data.values
+        out[label] = xr.DataArray(
+            values, dims=("repetition", dim), coords={dim: index_values}, attrs=dict(data.attrs),
+        )
+    return out
+
+
+def run_schedule(schedule, agent, timeout=60):
+    """Run ``schedule`` on ``agent`` and return the acquisitions in the old layout."""
+    raw = agent.run(schedule, timeout=timeout, save_to_experiment=False, save_snapshot=False)
+    return legacy_acquisition_layout(raw)
 
 
 def _add_ge_pair(schedule, qubit_name, acq_index, readout_duration, **measure_kwargs):
-    """Measure the qubit in |g> (acq_index) and then in |e> (acq_index + 1),
-    with the TWPA pump gated on if the qubit's ``twpa_pump`` setting allows."""
+    """Measure the qubit in |g> (acq_index) and then in |e> (acq_index + 1), one value per
+    shot, with the TWPA pump gated on if the qubit's TWPA setting allows."""
     for excited in (False, True):
         schedule.add(Reset(qubit_name))
         if excited:
@@ -75,9 +96,9 @@ def _add_ge_pair(schedule, qubit_name, acq_index, readout_duration, **measure_kw
             qubit_name,
             readout_duration=readout_duration,
             marker_label=f"TWPA_mark {acq_index + excited}",
-            acq_index=acq_index + excited,
-            acq_protocol="SSBIntegrationComplex",
-            bin_mode=BinMode.APPEND,
+            coords={"acq_index": acq_index + excited},
+            acq_protocol="IQIntegration",
+            average_segment_repetitions=False,
             **measure_kwargs,
         )
 
@@ -85,33 +106,33 @@ def _add_ge_pair(schedule, qubit_name, acq_index, readout_duration, **measure_kw
 # ----------------------------------------------------------------------------
 # schedule builders
 # ----------------------------------------------------------------------------
-def readout_freq_optimization_schedule(qubit, frequencies, repetitions=1) -> Schedule:
+def readout_freq_optimization_schedule(qubit, frequencies, repetitions=1) -> TimeableSchedule:
     """|g>/|e> readout pairs, one per readout frequency (acq_index 2i and 2i+1)."""
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     name = qubit.name
-    schedule = Schedule("Readout frequency optimization", repetitions)
+    schedule = TimeableSchedule("Readout frequency optimization", repetitions)
     for i, freq in enumerate(_as_1d(frequencies)):
-        schedule.add(SetClockFrequency(clock=f"{name}.ro", clock_freq_new=freq))
+        schedule.add(SetClockFrequency(clock=f"{name}.ro", frequency=freq))
         _add_ge_pair(schedule, name, 2 * i, readout_duration)
     schedule.add(IdlePulse(duration=4e-9), label="end")
     return schedule
 
 
-def readout_amp_optimization_schedule(qubit, amps, repetitions=1) -> Schedule:
+def readout_amp_optimization_schedule(qubit, amps, repetitions=1) -> TimeableSchedule:
     """|g>/|e> readout pairs, one per readout pulse amplitude."""
-    readout_duration = qubit.measure.pulse_duration()
+    readout_duration = qubit.measure.pulse_duration
     name = qubit.name
-    schedule = Schedule("Readout amplitude optimization", repetitions)
+    schedule = TimeableSchedule("Readout amplitude optimization", repetitions)
     for i, amp in enumerate(_as_1d(amps)):
         _add_ge_pair(schedule, name, 2 * i, readout_duration, pulse_amp=amp)
     schedule.add(IdlePulse(duration=4e-9), label="end")
     return schedule
 
 
-def readout_len_optimization_schedule(qubit, lens, repetitions=1) -> Schedule:
+def readout_len_optimization_schedule(qubit, lens, repetitions=1) -> TimeableSchedule:
     """|g>/|e> readout pairs, one per readout duration (pulse and integration together)."""
     name = qubit.name
-    schedule = Schedule("Readout length optimization", repetitions)
+    schedule = TimeableSchedule("Readout length optimization", repetitions)
     for i, length in enumerate(_as_1d(lens)):
         _add_ge_pair(
             schedule, name, 2 * i, length,
@@ -121,16 +142,16 @@ def readout_len_optimization_schedule(qubit, lens, repetitions=1) -> Schedule:
     return schedule
 
 
-def readout_weight_optimization_schedule(qubit, excited, repetitions=1) -> Schedule:
+def readout_weight_optimization_schedule(qubit, excited, repetitions=1) -> TimeableSchedule:
     """One averaged Trace acquisition of the qubit in |g> (or |e> if ``excited``)."""
     name = qubit.name
-    schedule = Schedule("Readout weight optimization", repetitions)
+    schedule = TimeableSchedule("Readout weight optimization", repetitions)
     schedule.add(Reset(name))
     if excited:
         schedule.add(X(qubit=name))
     measure_with_twpa(
-        schedule, name, readout_duration=qubit.measure.pulse_duration(),
-        acq_channel=0, acq_protocol="Trace", bin_mode=BinMode.AVERAGE,
+        schedule, name, readout_duration=qubit.measure.pulse_duration,
+        acq_label=0, acq_protocol="Trace",
     )
     schedule.add(IdlePulse(duration=4e-9), label="end")
     return schedule
@@ -144,81 +165,50 @@ _DRAG_PAIRS = (
 )
 
 
-def drag_calibration_schedule(qubit, motzoi_list, repetitions=1) -> Schedule:
-    """For each motzoi, the two DRAG-sensitive AllXY elements (acq_index 2i and 2i+1)."""
-    readout_duration = qubit.measure.pulse_duration()
+def drag_calibration_schedule(qubit, beta_list, repetitions=1) -> TimeableSchedule:
+    """For each ``rxy.beta``, the two DRAG-sensitive AllXY elements (acq_index 2i and 2i+1)."""
+    readout_duration = qubit.measure.pulse_duration
     name = qubit.name
-    schedule = Schedule("DRAG calibration", repetitions)
-    for i, m in enumerate(_as_1d(motzoi_list)):
+    schedule = TimeableSchedule("DRAG calibration", repetitions)
+    for i, beta in enumerate(_as_1d(beta_list)):
         for k, ((th0, phi0), (th1, phi1)) in enumerate(_DRAG_PAIRS):
             schedule.add(Reset(name))
-            schedule.add(Rxy(qubit=name, theta=th0, phi=phi0, motzoi=m))
-            schedule.add(Rxy(qubit=name, theta=th1, phi=phi1, motzoi=m))
+            schedule.add(Rxy(qubit=name, theta=th0, phi=phi0, beta=beta))
+            schedule.add(Rxy(qubit=name, theta=th1, phi=phi1, beta=beta))
             measure_with_twpa(schedule, name, readout_duration=readout_duration,
-                              marker_label=f"TWPA_mark {2 * i + k}", acq_index=2 * i + k)
+                              marker_label=f"TWPA_mark {2 * i + k}",
+                              coords={"acq_index": 2 * i + k})
     schedule.add(IdlePulse(duration=4e-9), label="end")
     return schedule
 
 
 # ----------------------------------------------------------------------------
-# runners (same signatures and return values as before the move)
+# runners
 # ----------------------------------------------------------------------------
-def readout_freq_optimization(
-    qubit,
-    frequencies: Union[np.ndarray, float],
-    instrument_coordinator,
-    quantum_device,
-    repetitions: int = 1,
-):
+def readout_freq_optimization(qubit, frequencies: Union[np.ndarray, float], agent, repetitions: int = 1):
     schedule = readout_freq_optimization_schedule(qubit, frequencies, repetitions)
-    return run_compiled(schedule, quantum_device, instrument_coordinator, timeout_sec=90)
+    return run_schedule(schedule, agent, timeout=90)
 
 
-def readout_amp_optimization(
-    qubit,
-    amps: Union[np.ndarray, float],
-    instrument_coordinator,
-    quantum_device,
-    repetitions: int = 1,
-):
+def readout_amp_optimization(qubit, amps: Union[np.ndarray, float], agent, repetitions: int = 1):
     schedule = readout_amp_optimization_schedule(qubit, amps, repetitions)
-    return run_compiled(schedule, quantum_device, instrument_coordinator, timeout_sec=90)
+    return run_schedule(schedule, agent, timeout=90)
 
 
-def readout_len_optimization(
-    qubit,
-    lens: Union[np.ndarray, float],
-    instrument_coordinator,
-    quantum_device,
-    repetitions: int = 1,
-):
+def readout_len_optimization(qubit, lens: Union[np.ndarray, float], agent, repetitions: int = 1):
     schedule = readout_len_optimization_schedule(qubit, lens, repetitions)
-    return run_compiled(schedule, quantum_device, instrument_coordinator, timeout_sec=90)
+    return run_schedule(schedule, agent, timeout=90)
 
 
-def readout_weight_optimization(
-    qubit,
-    instrument_coordinator,
-    quantum_device,
-    repetitions: int = 1,
-):
+def readout_weight_optimization(qubit, agent, repetitions: int = 1):
     """Return ``(g_trace, e_trace)``, two separate averaged Trace runs."""
     g_trace, e_trace = (
-        run_compiled(
-            readout_weight_optimization_schedule(qubit, excited, repetitions),
-            quantum_device, instrument_coordinator, timeout_sec=30,
-        )
+        run_schedule(readout_weight_optimization_schedule(qubit, excited, repetitions), agent, timeout=30)
         for excited in (False, True)
     )
     return g_trace, e_trace
 
 
-def DRAG_calibration_sched(
-    qubit,
-    motzoi_list: Union[np.ndarray, float],
-    instrument_coordinator,
-    quantum_device,
-    repetitions: int = 1,
-):
-    schedule = drag_calibration_schedule(qubit, motzoi_list, repetitions)
-    return run_compiled(schedule, quantum_device, instrument_coordinator, timeout_sec=60)
+def DRAG_calibration_sched(qubit, beta_list: Union[np.ndarray, float], agent, repetitions: int = 1):
+    schedule = drag_calibration_schedule(qubit, beta_list, repetitions)
+    return run_schedule(schedule, agent, timeout=60)

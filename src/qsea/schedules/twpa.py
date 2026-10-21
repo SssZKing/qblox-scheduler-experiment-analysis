@@ -49,7 +49,32 @@ __all__ = [
     "max_readout_duration",
     "add_twpa_marker",
     "measure_with_twpa",
+    "legacy_measure_kwargs",
 ]
+
+
+def legacy_measure_kwargs(kwargs: dict) -> dict:
+    """``Measure`` keyword arguments with quantify-scheduler's names translated.
+
+    ``acq_index=i`` becomes ``coords={"acq_index": i}``, ``bin_mode`` becomes
+    ``average_segment_repetitions``, ``acq_channel`` becomes ``acq_label`` and old
+    ``acq_protocol`` names are mapped (:mod:`qsea.schedules.acquisition`). Without this,
+    ``Measure`` would take ``bin_mode="append"`` as a device override and silently average.
+    """
+    from qsea.schedules.acquisition import acq_protocol_name, average_repetitions
+
+    kwargs = dict(kwargs)
+    if "acq_index" in kwargs:
+        coords = dict(kwargs.get("coords") or {})
+        coords.setdefault("acq_index", kwargs.pop("acq_index"))
+        kwargs["coords"] = coords
+    if "bin_mode" in kwargs:
+        kwargs.setdefault("average_segment_repetitions", average_repetitions(kwargs.pop("bin_mode")))
+    if "acq_channel" in kwargs:
+        kwargs.setdefault("acq_label", kwargs.pop("acq_channel"))
+    if "acq_protocol" in kwargs:
+        kwargs["acq_protocol"] = acq_protocol_name(kwargs["acq_protocol"])
+    return kwargs
 
 
 # Element name -> whether its readouts trigger the TWPA pump. Missing means True.
@@ -177,6 +202,7 @@ def measure_with_twpa(
     Schedulable
         The ``Measure``.
     """
+    measure_kwargs = legacy_measure_kwargs(measure_kwargs)
     ro_pulse = schedule.add(
         Measure(*qubits, **measure_kwargs),
         rel_time=rel_time,
